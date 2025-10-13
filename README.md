@@ -1,5 +1,8 @@
 ## 369 Cleanse Tracker
-A simple, elegant Streamlit app for tracking Medical Medium® 369 cleanse programs.
+This app helps you track a 9-day cleanse routine inspired by the meal plans in [this book](https://books.google.com/books?id=k3EtzAEACAAJ&newbks=0&hl=en&source=newbks_fb).
+
+It’s a simple companion for daily check-ins.
+Disclaimer: For personal wellness tracking only—this is not medical advice or a substitute for professional care. This project is independent and not affiliated with the book’s author or publisher.
 
 ## Features
 - Menu → Select a program: Original, Simplified, Advanced (text-only cards with smooth selection)
@@ -18,17 +21,17 @@ A simple, elegant Streamlit app for tracking Medical Medium® 369 cleanse progra
 
 
 ## Quick Start (developer)
- 1) Clone
+### 1) Clone
 git clone https://github.com/yliu668/mm-369-tracker.git
 cd mm-369-tracker
 
-# 2) Create a virtual env (recommended)
+### 2) Create a virtual env (recommended)
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# 3) Install
+### 3) Install
 pip install -r requirements.txt
 # (or) pip install streamlit
 
-# 4) Run
+### 4) Run
 streamlit run app.py
