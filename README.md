@@ -1,10 +1,10 @@
 ## 369 Cleanse Tracker
 
-Click [here](https://mm369cleanse.streamlit.app/) to access the tracker. 
-This app helps you track a 9-day cleanse routine inspired by the meal plans in [this book](https://books.google.com/books?id=k3EtzAEACAAJ&newbks=0&hl=en&source=newbks_fb).
+- Click [here](https://mm369cleanse.streamlit.app/) to access the tracker. 
+- This app helps you track a 9-day cleanse routine inspired by the meal plans in [this book](https://books.google.com/books?id=k3EtzAEACAAJ&newbks=0&hl=en&source=newbks_fb).
 
 It’s a simple companion for daily check-ins.
-Disclaimer: For personal wellness tracking only—this is not medical advice or a substitute for professional care. This project is independent and not affiliated with the book’s author or publisher.
+- Disclaimer: For personal wellness tracking only—this is not medical advice or a substitute for professional care. This project is independent and not affiliated with the book’s author or publisher.
 
 ## Features
 - Menu → Select a program: Original, Simplified, Advanced (text-only cards with smooth selection)
@@ -16,6 +16,7 @@ Disclaimer: For personal wellness tracking only—this is not medical advice or 
 - Future-ready: Supabase integration planned for cloud sync
 
 ## 📸 Screenshots
+![Demo](docs/recording.mp4)
 
 ![Menu – Program selection](docs/screenshot_1.png)
 ![Home – Progress and quote](docs/screenshot_2.png)
@@ -33,7 +34,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 ### 3) Install
 pip install -r requirements.txt
-# (or) pip install streamlit
+pip install streamlit
 
 ### 4) Run
 streamlit run app.py
