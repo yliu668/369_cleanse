@@ -1,4 +1,6 @@
 ## 369 Cleanse Tracker
+
+Click [here](https://mm369cleanse.streamlit.app/) to access the tracker. 
 This app helps you track a 9-day cleanse routine inspired by the meal plans in [this book](https://books.google.com/books?id=k3EtzAEACAAJ&newbks=0&hl=en&source=newbks_fb).
 
 It’s a simple companion for daily check-ins.
