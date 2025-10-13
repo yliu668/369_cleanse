@@ -16,7 +16,8 @@ It’s a simple companion for daily check-ins.
 - Future-ready: Supabase integration planned for cloud sync
 
 ## 📸 Screenshots
-![Demo](docs/recording.mp4)
+[![▶️ Watch the demo](docs/recording.gif)
+
 
 ![Menu – Program selection](docs/screenshot_1.png)
 ![Home – Progress and quote](docs/screenshot_2.png)
