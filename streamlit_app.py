@@ -357,11 +357,14 @@ def sb_sign_in(email: str, password: str) -> bool:
             st.error("Sign-in returned no session tokens.")
             return False
 
-        # Store tokens in a single cookie and trigger a UI toast after rerun
-        cookies.set("sb-session", json.dumps({"at": access, "rt": refresh}))
-        st.session_state["_auth_toast"] = "Signed in successfully ✅"
+        # ✅ set the session NOW (works even before the cookie roundtrip)
+        sb.auth.set_session(access, refresh)
 
-        # If a program was already selected/started, go straight to Home
+        # ✅ persist for later reruns
+        cookies.set("sb-session", json.dumps({"at": access, "rt": refresh}))
+
+        # one-time toast + optional redirect to Home if a program was chosen
+        st.session_state["_auth_toast"] = "Signed in successfully ✅"
         if st.session_state.get("active"):
             st.session_state.page = "home"
 
@@ -460,15 +463,23 @@ if user and not st.session_state.active:
         st.session_state.checks = dict(row.get("checks", {}))
 else:
     _rehydrate_from_url()
+# --- Minimal debug, enable with ?debug=1 in the URL ---
+_qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
+if _qp.get("debug") == "1":
+    st.sidebar.header("Auth Debug")
+    st.sidebar.write("sb client:", "OK" if sb else "None")
+    st.sidebar.write("user present:", bool(user))
+    if user:
+        st.sidebar.write("user id:", getattr(user, "id", None))
+        st.sidebar.write("email:", getattr(user, "email", None))
+    st.sidebar.write("cookie sb-session present:", bool(cookies.get("sb-session")))
+    st.sidebar.write("page:", st.session_state.page)
+    st.sidebar.write("active set:", bool(st.session_state.get("active")))
 
 # One-time auth toast (shown after a successful rerun from sb_sign_in)
 _msg = st.session_state.pop("_auth_toast", None)
 if _msg:
     st.toast(_msg)
-
-# If the user just signed in and already has local progress, ensure it gets saved to DB
-if user and st.session_state.get("active"):
-    sb_upsert_active(user.id, st.session_state.active)
 
 # -----------------------------
 # UI Components
@@ -529,38 +540,34 @@ def view_auth_gate():
         submit_signup = col[1].form_submit_button("Sign up")
 
     if submit_login and email and pw:
-        if sb_sign_in(email, pw):
-            st.session_state._auth_msg = f"Signed in as {email}"
-            st.session_state.page = "home"
-            st.rerun()
+        sb_sign_in(email, pw)
 
     if submit_signup and email and pw:
         sb_sign_up(email, pw)
 
 def view_menu():
-    # one-time banner after sign-in
-    msg = st.session_state.pop("_auth_msg", None)
-    if msg:
-        st.success(msg)
-
     # If signed in and there is an active cycle, land on Home
     if user and st.session_state.get("active"):
         st.session_state.page = "home"
         st.rerun()
 
     header_bar()
+
+    # Auth gate (hidden automatically when signed in)
     if not user:
         with st.expander("Sign in (optional) to save progress across multiple devices", expanded=False):
             view_auth_gate()
 
     st.write("")
     st.markdown("### Choose your program")
+
     keys = ["original", "simplified", "advanced"]
     selected_key = st.session_state.get("_home_selection", "original")
 
     cols = st.columns(3, gap="large")
     for col, key in zip(cols, keys):
-        label = PROGRAMS[key]["label"]; is_selected = key == selected_key
+        label = PROGRAMS[key]["label"]
+        is_selected = key == selected_key
         with col:
             st.markdown(
                 f"""
@@ -571,7 +578,12 @@ def view_menu():
                 """,
                 unsafe_allow_html=True,
             )
-            if st.button("✅ Selected" if is_selected else "Select", key=f"pick_{key}", use_container_width=True, type="primary" if is_selected else "secondary"):
+            if st.button(
+                "✅ Selected" if is_selected else "Select",
+                key=f"pick_{key}",
+                use_container_width=True,
+                type="primary" if is_selected else "secondary",
+            ):
                 st.session_state._home_selection = key
                 st.session_state._home_label = PROGRAMS[key]["label"]
                 st.rerun()
@@ -582,17 +594,36 @@ def view_menu():
     st.markdown(f"##### Selected: **{PROGRAMS[prog_key]['label']}**")
 
     today = date.today()
-    start_mode = st.radio("Quick start", ["Yesterday", "Today", "Tomorrow", "Pick a date"], index=1, horizontal=True)
-    start_date = today if start_mode == "Today" else (today - timedelta(days=1) if start_mode == "Yesterday" else (today + timedelta(days=1) if start_mode == "Tomorrow" else st.date_input("Start on", value=today)))
+    start_mode = st.radio(
+        "Quick start",
+        ["Yesterday", "Today", "Tomorrow", "Pick a date"],
+        index=1,
+        horizontal=True,
+    )
+    start_date = (
+        today
+        if start_mode == "Today"
+        else (
+            today - timedelta(days=1)
+            if start_mode == "Yesterday"
+            else (
+                today + timedelta(days=1)
+                if start_mode == "Tomorrow"
+                else st.date_input("Start on", value=today)
+            )
+        )
+    )
 
     if st.button("Start", type="primary"):
         begin_cycle(prog_key, start_date)
-        st.session_state.page = "home"; st.rerun()
+        st.session_state.page = "home"
+        st.rerun()
 
     if st.session_state.active:
         st.info("You have an in-progress cycle. Go to Home or click Log now to resume.")
         if st.button("Log now"):
-            st.session_state.page = "tracker"; st.rerun()
+            st.session_state.page = "tracker"
+            st.rerun()
 
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
@@ -600,15 +631,21 @@ def view_menu():
         if st.session_state.active:
             data = json.dumps(st.session_state.active, indent=2)
             st.download_button("⬇️ Export current progress", data, file_name="mm369_progress.json")
-        uploaded = st.file_uploader("Your data belong to you. Restore from exported JSON", type=["json"])
+
+        uploaded = st.file_uploader(
+            "Your data belong to you. Restore from exported JSON",
+            type=["json"],
+        )
         if uploaded is not None:
             try:
                 state = json.loads(uploaded.read().decode("utf-8"))
                 if required_keys_ok(state):
                     st.session_state.active = state
                     st.session_state.checks = dict(state.get("checks", {}))
-                    if user: sb_upsert_active(user.id, st.session_state.active)
-                    else: _persist_active_to_url()
+                    if user:
+                        sb_upsert_active(user.id, st.session_state.active)
+                    else:
+                        _persist_active_to_url()
                     st.success("Progress restored.")
                 else:
                     st.error("This JSON does not look like a saved MM 369 state.")
@@ -616,10 +653,6 @@ def view_menu():
                 st.error(f"Could not parse file: {e}")
 
 def view_home():
-    msg = st.session_state.pop("_auth_msg", None)
-    if msg:
-        st.success(msg)
-
     if not st.session_state.active:
         st.session_state.page = "menu"; st.rerun()
 
