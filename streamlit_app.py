@@ -532,13 +532,22 @@ def view_auth_gate():
         col = st.columns(2)
         submit_login = col[0].form_submit_button("Sign in", type="primary")
         submit_signup = col[1].form_submit_button("Sign up")
+
     if submit_login and email and pw:
         if sb_sign_in(email, pw):
+            # show a one-time success banner after rerun
+            st.session_state._auth_msg = f"Signed in as {email}"
+            # go to Home right away
+            st.session_state.page = "home"
             st.rerun()
+
     if submit_signup and email and pw:
         sb_sign_up(email, pw)
 
 def view_menu():
+    msg = st.session_state.pop("_auth_msg", None)
+    if msg:
+        st.success(msg)
     def view_menu():
     # If signed in and there is an active cycle, land on Home
         if user and st.session_state.get("active"):
@@ -611,6 +620,10 @@ def view_menu():
                 st.error(f"Could not parse file: {e}")
 
 def view_home():
+    msg = st.session_state.pop("_auth_msg", None)
+    if msg:
+     st.success(msg)
+
     if not st.session_state.active:
         st.session_state.page = "menu"; st.rerun()
 
@@ -711,8 +724,12 @@ def render_group(active: Dict[str, Any], group_key: str):
 
     if changed:
         st.session_state.active = active
-        if user: sb_upsert_active(user.id, active)
-        else: _persist_active_to_url()
+        if user:
+            sb_upsert_active(user.id, active)
+            st.toast("Saved to cloud ⛅")   # <— visual confirmation
+    else:
+        _persist_active_to_url()
+
 
 # -----------------------------
 # History / medals
@@ -759,8 +776,11 @@ def begin_cycle(program_key: str, start_dt: date):
         "id": cycle_id(program_key, start_iso),
         "checks": {},
     }
-    if user: sb_upsert_active(user.id, st.session_state.active)
-    else: _persist_active_to_url()
+    if user:
+        sb_upsert_active(user.id, st.session_state.active)
+        st.toast("Started + saved to cloud ⛅")
+    else:
+        _persist_active_to_url()
 
 # -----------------------------
 # Router
