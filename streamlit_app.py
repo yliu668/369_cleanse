@@ -336,6 +336,33 @@ def sb_delete_active(user_id: str, cycle_id: str):
     except Exception as e:
         st.error("Couldn't end the program without awarding a medal.")
         st.code(repr(e))
+def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pct_done: int):
+    """
+    Mark the active cycle as finished (persist checks), and record whether a medal was awarded.
+    """
+    if not sb or not state:
+        return
+    try:
+        payload = {
+            "is_completed": True,
+            "medal_awarded": medal_awarded,
+            "pct_done": pct_done,
+            "completed_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            # persist whatever checks we have at finish time
+            "checks": {k: True for k, v in state.get("checks", {}).items() if v},
+        }
+        (
+            sb.table("progress")
+              .update(payload)
+              .eq("user_id", user_id)
+              .eq("cycle_id", state["id"])
+              .execute()
+        )
+    except Exception as e:
+        st.error("Couldn't finish the program.")
+        st.code(repr(e))
+
 
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
@@ -503,6 +530,15 @@ def sb_mark_completed(user_id: str, cycle_id: str):
 
 def sb_completed_count(user_id: str) -> int:
     if not sb: return 0
+    res = (sb.table("progress")
+             .select("id", count="exact")
+             .eq("user_id", user_id)
+             .eq("is_completed", True)
+             .eq("medal_awarded", True)
+             .execute())
+    return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
+
+    if not sb: return 0
     res = sb.table("progress").select("id", count="exact").eq("user_id", user_id).eq("is_completed", True).execute()
     return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
 
@@ -600,7 +636,7 @@ def header_bar():
 
             if c3.button("🔄 Start Over"):
                 if user and st.session_state.active:
-                 # Signed-in users: show a gentle nudge instead of nuking state
+                    # Signed-in users: show a gentle nudge instead of nuking state
                     st.session_state["_show_start_over_hint"] = True
                     st.rerun()
                 else:
@@ -611,27 +647,32 @@ def header_bar():
 
             # --- Finish button (always shown if a cycle is active) ---
             if st.session_state.active:
-                total, done = count_tasks(st.session_state.active)
-                frac = (done / total) if total else 0.0
-
                 if c4.button("🥇 Finish program"):
+                    total, done = count_tasks(st.session_state.active)
+                    frac = (done / total) if total else 0.0
+                    pct = int(round(frac * 100))
+
                     if is_cycle_complete(st.session_state.active) or (frac >= FINISH_WARN_THRESHOLD):
-                        # Finish immediately when complete or ≥ threshold
+                        # Finish immediately; award medal
                         if user:
-                            sb_mark_completed(user.id, st.session_state.active["id"])
+                            sb_finish_cycle(user.id, st.session_state.active, medal_awarded=True, pct_done=pct)
                         else:
+                            # anon mode: medals only count when ≥80%
                             st.session_state.completed_cycles += 1
+
                         st.session_state.active = None
                         _clear_qp()
                         st.session_state.page = "history"
                         st.balloons()
                         st.rerun()
                     else:
-                        # ask for confirmation if < threshold
+                        # ask for confirmation if <80%
                         st.session_state["_confirm_finish"] = {"pct": frac}
                         st.rerun()
+
         if st.session_state.pop("_show_start_over_hint", False):
             st.info("Change your mind? Click Finish program button to re-select a new program")
+
     # --- Confirmation UI for early finish (<80%) ---
     cf = st.session_state.get("_confirm_finish")
     if cf:
@@ -645,10 +686,16 @@ def header_bar():
             if st.button("Yes – finish without medal", key="confirm_finish_yes", type="primary"):
                 st.session_state.pop("_confirm_finish", None)
                 if st.session_state.active:
+                    # compute pct at finish time
+                    total, done = count_tasks(st.session_state.active)
+                    frac = (done / total) if total else 0.0
+                    pct2 = int(round(frac * 100))
+
                     if user:
-                # End the cycle WITHOUT awarding a medal
-                        sb_delete_active(user.id, st.session_state.active["id"])
-            # Anonymous users: do NOT increment medals
+                        # End the cycle WITHOUT awarding a medal (keep data)
+                        sb_finish_cycle(user.id, st.session_state.active, medal_awarded=False, pct_done=pct2)
+                    # Anonymous users: no medal increment and no history persisted
+
                 st.session_state.active = None
                 _clear_qp()
                 st.session_state.page = "history"
