@@ -17,6 +17,33 @@ FINISH_WARN_THRESHOLD = 0.80  # confirm only if progress is below 80%
 # Page config
 # -----------------------------
 st.set_page_config(page_title="MM 369 Cleanse Tracker", page_icon="🥗", layout="wide")
+import streamlit.components.v1 as components
+
+def _capture_hash_tokens():
+    # Moves #access_token=... from URL hash -> query string, then reloads once
+    components.html(
+        """
+        <script>
+        (function(){
+          const h = new URLSearchParams(location.hash.slice(1));
+          if (!h.toString()) return;
+          const q = new URLSearchParams(location.search);
+          if (!q.get("__from_hash")) {
+            for (const [k,v] of h) q.set(k,v);
+            q.set("__from_hash","1");
+            const u = location.pathname + "?" + q.toString();
+            history.replaceState({}, "", u);
+            location.hash = "";
+            location.replace(u);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+# Call once after page_config:
+_capture_hash_tokens()
 
 # -----------------------------
 # Styles
@@ -576,6 +603,21 @@ else:
     _rehydrate_from_url()
 # --- Minimal debug, enable with ?debug=1 in the URL ---
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
+# Auto-login via magic-link tokens moved to query by _capture_hash_tokens()
+if sb:
+    at = _qp.get("access_token")
+    rt = _qp.get("refresh_token")
+    if at and rt and not st.session_state.get("_sb_tokens"):
+        try:
+            sb.auth.set_session(access_token=at, refresh_token=rt)
+            st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+            cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
+                        expires_at=datetime.utcnow() + timedelta(days=30))
+            st.session_state["_auth_toast"] = "Signed in via email link ✅"
+            st.rerun()
+        except Exception:
+            pass
+
 if _qp.get("debug") == "1":
     st.sidebar.header("Auth Debug")
     st.sidebar.write("session_state tokens present:", bool(st.session_state.get("_sb_tokens")))
@@ -722,7 +764,7 @@ def view_auth_gate():
     if do_login:
         if not email or not pw:
             st.warning("Please enter email and password.")
-        elif sb_sign_in(email, pw):      # sets session, cookie, and reruns
+        elif sb_sign_in(email, pw):  # sets session, cookie, and reruns
             st.session_state.page = "home"
             st.rerun()
 
@@ -731,6 +773,26 @@ def view_auth_gate():
             st.warning("Please enter email and password.")
         else:
             sb_sign_up(email, pw)
+
+    # 🔑 Magic Link (no password needed)
+    with st.expander("Forgot password? Use a magic sign-in link"):
+        ml_email = st.text_input("Email for magic link", key="ml_email")
+        if st.button("Send magic link"):
+            if not sb:
+                st.error("Supabase not configured.")
+            elif not ml_email:
+                st.warning("Enter your email.")
+            else:
+                try:
+                    SITE_URL = st.secrets.get("SITE_URL") or "http://localhost:8501"
+                    sb.auth.sign_in_with_otp({
+                        "email": ml_email,
+                        "options": {"email_redirect_to": SITE_URL}
+                    })
+                except Exception:
+                    # Don't reveal whether the email exists
+                    pass
+                st.success("If an account exists, a sign-in link was sent.")
 
 def view_menu():
     # If signed in and there is an active cycle, land on Home
