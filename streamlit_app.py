@@ -3,23 +3,16 @@
 # - Menu: choose program (Original / Simplified / Advanced) — text-only, no images
 # - Pick a start date (calendar) or quick chips (yesterday/today/tomorrow)
 # - Home: shows current day, phase, progress, medals, and a motivational quote
-# - Tracker: Days 1–3, 4–6, 7–9 grouped; interactive checkboxes
+# - Tracker: Days 1–3, 4–6, 7–8, 9 grouped; interactive checkboxes
 # - Progress bar; Start Over; Finish Cycle awards a medal
 # - Optional export/import JSON for persistence without a database (future: Supabase)
-#
-# To run locally:
-#   pip install streamlit
-#   streamlit run app.py
-#
-# To deploy:
-#   - Streamlit Community Cloud: new app from this repo
-#   - Hugging Face Spaces: set SDK to Streamlit
 
 from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, Tuple
 import random
+import base64, zlib
 import streamlit as st
 
 # -----------------------------
@@ -37,7 +30,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-/* Theme-aware styling using Streamlit theme variables */
 :root{
   --st-bg: var(--background-color);
   --st-bg2: var(--secondary-background-color);
@@ -49,7 +41,6 @@ html, body { color: var(--st-text); }
 .card{ border:1px solid rgba(0,0,0,.10); border-radius:16px; padding:1rem; background:var(--st-bg2); }
 .card.selected{ outline:3px solid var(--st-primary); }
 
-/* Text-only selection cards */
 .select-card{
   border:1px solid rgba(0,0,0,.12);
   border-radius:14px; padding:1rem; text-align:center; background:var(--st-bg2);
@@ -57,7 +48,6 @@ html, body { color: var(--st-text); }
 }
 .select-card.selected{ outline:3px solid var(--st-primary); }
 
-/* Buttons follow theme */
 .stButton>button{
   border-radius:14px; padding:0.6rem 1rem; border:1px solid rgba(0,0,0,.12);
   background:transparent; color:var(--st-text);
@@ -81,6 +71,7 @@ html, body { color: var(--st-text); }
 .section-label {font-weight:700; margin:.25rem 0 .35rem 0}
 .medal {font-size:1.8rem; letter-spacing:2px}
 .kicker {font-size:.85rem; text-transform:uppercase; letter-spacing:.1em; opacity:.7}
+
 /***** Modern program option cards *****/
 .option-card{
   position:relative;
@@ -100,15 +91,13 @@ html, body { color: var(--st-text); }
   font-size:1rem; opacity:0; transition:opacity .2s ease;
 }
 .option-card.selected .badge{ opacity:1; }
-
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
 # -----------------------------
-# Program templates (edit later with your exact content)
+# Program templates
 # -----------------------------
 PROGRAMS: Dict[str, Dict[str, Any]] = {
     "original": {
@@ -121,12 +110,12 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                         "Wait 15–30 minutes",
                         "16 ounces celery juice",
                         "Wait another 15–30 minutes",
-                        "Breakfast & mid‑morning snack (within guidelines) — Day 2–3 include 1–2 apples/applesauce",
+                        "Breakfast & mid-morning snack (within guidelines) — Day 2–3 include 1–2 apples/applesauce",
                     ]},
                     {"name": "Lunchtime", "items": [
                         "Meal of your choice (within guidelines) + steamed zucchini/summer squash",
                     ]},
-                    {"name": "Mid‑Afternoon", "items": ["1–2 apples (or applesauce) with 1–2 dates"]},
+                    {"name": "Mid-Afternoon", "items": ["1–2 apples (or applesauce) with 1–2 dates"]},
                     {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                     {"name": "Evening", "items": [
                         "Apple or applesauce (optional)",
@@ -141,32 +130,33 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                     {"name": "Morning", "items": [
                         "Wait 15–30 minutes",
                         "16 ounces celery juice",
-                        "Wait another 15-30 minutes",
+                        "Wait another 15–30 minutes",
                         "Liver Rescue Smoothie",
                     ]},
                     {"name": "Lunchtime", "items": ["Steamed asparagus with Liver Rescue Salad"]},
-                    {"name": "Mid‑Afternoon", "items": ["At least 1–2 apples/applesauce + 1-3 dates + celery sticks"]},
-                    {"name": "Dinnertime", "items": ["Steamed asparagus with Liver Rescue Salad. Day 5: brusels sprouts instead of asparagus. Day 6: both + liver rescue salad"]},
-                    {"name": "Evening", "items": ["Apple/applesauce (if desired)", "16 ounces Lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
+                    {"name": "Mid-Afternoon", "items": ["At least 1–2 apples/applesauce + 1–3 dates + celery sticks"]},
+                    {"name": "Dinnertime", "items": ["Steamed asparagus with Liver Rescue Salad. Day 5: brussels sprouts instead of asparagus. Day 6: both + liver rescue salad"]},
+                    {"name": "Evening", "items": ["Apple/applesauce (if desired)", "16 ounces lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
                 ]
             },
-   
             "7-8": {
                 "sections": [
                     {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
                     {"name": "Morning", "items": [
                         "Wait 15–30 minutes",
                         "16 ounces celery juice",
-                        "wait another 15–30 minutes",
+                        "Wait another 15–30 minutes",
                         "Liver Rescue Smoothie",
                     ]},
                     {"name": "Lunchtime", "items": ["Spinach Soup over cucumber noodles"]},
-                    {"name": "Mid‑Afternoon", "items": ["Wait at least 60 mins",
-                                                        "16 ounces celery juice",
-                                                        "Wait at least 15 to 30 minutes then"
-                                                        "1–2 apples/applesauce + cucumber slices + celery sticks"]},
-                    {"name": "Dinnertime", "items": ["Steamed squash, sweet potatos, yams, or potatoes with steamed asparagus and/or brussels sprouts + optional liver rescue salad"]},
-                    {"name": "Evening", "items": ["Optional apple/applesauce", "16 ounces Lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
+                    {"name": "Mid-Afternoon", "items": [
+                        "Wait at least 60 mins",
+                        "16 ounces celery juice",
+                        "Wait at least 15–30 minutes then",
+                        "1–2 apples/applesauce + cucumber slices + celery sticks",
+                    ]},
+                    {"name": "Dinnertime", "items": ["Steamed squash, sweet potatoes, yams, or potatoes with steamed asparagus and/or brussels sprouts + optional liver rescue salad"]},
+                    {"name": "Evening", "items": ["Optional apple/applesauce", "16 ounces lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
                 ]
             },
             "9": {
@@ -176,17 +166,19 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                         "Wait 15–30 minutes",
                         "16 ounces celery juice",
                         "Wait another 15–30 minutes",
-                        "16-to-20-ounce cucumber-apple juices",
-                        "16-to-20-ounce cucumber-apple juices",
+                        "16–20 ounces cucumber-apple juice",
+                        "16–20 ounces cucumber-apple juice",
                     ]},
-                    {"name": "Lunchtime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Mid‑Afternoon", "items": ["Wait at least 15 mins",
-                                                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired",
-                                                        "Wait at least 15 to 30 minutes then",
-                                                        "water",
-                                                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Dinnertime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Evening", "items": ["16 ounces lemon or lime water",  "Hibiscus, lemon balm, or chaga tea"]},
+                    {"name": "Lunchtime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
+                    {"name": "Mid-Afternoon", "items": [
+                        "Wait at least 15 mins",
+                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                        "Wait at least 15–30 minutes then",
+                        "Water",
+                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                    ]},
+                    {"name": "Dinnertime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
+                    {"name": "Evening", "items": ["16 ounces lemon or lime water", "Hibiscus, lemon balm, or chaga tea"]},
                 ]
             },
         },
@@ -195,95 +187,98 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
         "label": "Simplified 369",
         "groups": {
             "1-3": {"sections": [
-                {"name": "Upon Waking", "items": ["16 ounces Lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "16 ounces celery juice", "Wait another 15-30 mins", "Breakfast of your choice (within guidelines) and apples if desired"]},
+                {"name": "Upon Waking", "items": ["16 ounces lemon/lime water"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "16 ounces celery juice", "Wait another 15–30 mins", "Breakfast of your choice (within guidelines) and apples if desired"]},
                 {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines)"]},
-                {"name": "Mid‑Afternoon", "items": ["Optional apple + 1-4 dates + cucumber slices + celery sticks"]},
+                {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "4-6": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "24 ounces celery juice", "Wait another 15-30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "24 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
                 {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines)"]},
-                {"name": "Mid‑Afternoon", "items": ["Optional apple + 1-4 dates + cucumber slices + celery sticks"]},
+                {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "7-8": {"sections": [
-                {"name": "Upon Waking", "items": ["16 ounces Lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "32 ounces celery juice", "Wait another 15-30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
-                {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines"]},
-                {"name": "Mid‑Afternoon", "items": ["Optional apple + 1-4 dates + cucumber slices + celery sticks"]},
-                {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)that incoporates steamed asparagus and/or brussels sprouts"]},
+                {"name": "Upon Waking", "items": ["16 ounces lemon/lime water"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "32 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
+                {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines)"]},
+                {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
+                {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines) that incorporates steamed asparagus and/or brussels sprouts"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "9": {"sections": [
-                    {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
-                    {"name": "Morning", "items": [
-                        "Wait 15-30 minutes",
-                        "16 ounces celery juice",
-                        "Wait another 15–30 minutes",
-                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"
-                    ]},
-                    {"name": "Lunchtime", "items": ["Spinach soup"]},
-                    {"name": "Mid‑Afternoon", "items": ["Wait at least 60 mins",
-                                                        "16 ounces celery juice",
-                                                      "Wait at least 15 to 30 minutes then",
-                                                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired"]},
-                    {"name": "Dinnertime", "items": ["Asparagus Soup or Zuccini Basil Soup"]},
-                    {"name": "Evening", "items": ["16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
+                {"name": "Morning", "items": [
+                    "Wait 15–30 minutes",
+                    "16 ounces celery juice",
+                    "Wait another 15–30 minutes",
+                    "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
                 ]},
+                {"name": "Lunchtime", "items": ["Spinach soup"]},
+                {"name": "Mid-Afternoon", "items": [
+                    "Wait at least 60 mins",
+                    "16 ounces celery juice",
+                    "Wait at least 15–30 minutes then",
+                    "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                ]},
+                {"name": "Dinnertime", "items": ["Asparagus Soup or Zucchini Basil Soup"]},
+                {"name": "Evening", "items": ["16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+            ]},
         },
     },
     "advanced": {
         "label": "Advanced 369",
         "groups": {
             "1-3": {"sections": [
-                {"name": "Upon Waking", "items": ["32 ounces Lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "24 or 32 ounces celery juice", "Wait another 15-30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
+                {"name": "Upon Waking", "items": ["32 ounces lemon/lime water"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "24 or 32 ounces celery juice", "Wait another 15–30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
                 {"name": "Lunchtime", "items": ["Liver Rescue Smoothie or Spinach soup (with optional cucumber noodles)"]},
-                {"name": "Mid‑Afternoon", "items": ["Apples"]},
+                {"name": "Mid-Afternoon", "items": ["Apples"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "4-6": {"sections": [
-                {"name": "Upon Waking", "items": ["32 ounces Lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "32 ounces celery juice", "Wait another 15-30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
-                {"name": "Lunchtime", "items": ["Liver Rescue Smoothie or Spinach soup (with optional cucumber noodles"]},
-                {"name": "Mid‑Afternoon", "items": ["Apples if hungary"]},
+                {"name": "Upon Waking", "items": ["32 ounces lemon/lime water"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "32 ounces celery juice", "Wait another 15–30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
+                {"name": "Lunchtime", "items": ["Liver Rescue Smoothie or Spinach soup (with optional cucumber noodles)"]},
+                {"name": "Mid-Afternoon", "items": ["Apples if hungry"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "7-8": {"sections": [
-                {"name": "Upon Waking", "items": ["32 ounces Lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15-30 mins", "32 ounces celery juice", "Wait another 15-30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
-                {"name": "Lunchtime", "items": ["Liver Rescue Smoothie or Spinach soup (with optional cucumber noodles"]},
-                {"name": "Mid‑Afternoon", "items": ["Wait at least 60 mins","32 ounces celery juice","Wait at least 15 to 30 minutes then","Apples if hungary"]},
+                {"name": "Upon Waking", "items": ["32 ounces lemon/lime water"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "32 ounces celery juice", "Wait another 15–30 mins", "Heavy Metal Detox Smoothie", "Apples if desired"]},
+                {"name": "Lunchtime", "items": ["Liver Rescue Smoothie or Spinach soup (with optional cucumber noodles)"]},
+                {"name": "Mid-Afternoon", "items": ["Wait at least 60 mins","32 ounces celery juice","Wait at least 15–30 minutes then","Apples if hungry"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
             ]},
             "9": {"sections": [
-                    {"name": "Upon Waking", "items": ["32 ounces lemon or lime water"]},
-                    {"name": "Morning", "items": [
-                        "Morning: 32 ounces celery juice",
-                        "Wait another 15–30 minutes",
-                        "20-ounce cucumber-apple juices",
-                        "20-ounce cucumber-apple juices",
-                    ]},
-                    {"name": "Lunchtime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Mid‑Afternoon", "items": ["Wait at least 15 mins",
-                                                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired",
-                                                        "Wait at least 15 to 30 minutes then",
-                                                        "water",
-                                                        "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Dinnertime", "items": ["Evening: 32 ounces celery juice", "Wait 15-30 mins", "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed organge juice (as many servings and as often as desired)"]},
-                    {"name": "Evening", "items": ["16 ounces lemon or lime water",  "Hibiscus, lemon balm, or chaga tea"]},
-                ]}
+                {"name": "Upon Waking", "items": ["32 ounces lemon or lime water"]},
+                {"name": "Morning", "items": [
+                    "32 ounces celery juice",
+                    "Wait another 15–30 minutes",
+                    "20-ounce cucumber-apple juice",
+                    "20-ounce cucumber-apple juice",
+                ]},
+                {"name": "Lunchtime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
+                {"name": "Mid-Afternoon", "items": [
+                    "Wait at least 15 mins",
+                    "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                    "Wait at least 15–30 minutes then",
+                    "Water",
+                    "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                ]},
+                {"name": "Dinnertime", "items": ["32 ounces celery juice", "Wait 15–30 mins", "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
+                {"name": "Evening", "items": ["16 ounces lemon or lime water",  "Hibiscus, lemon balm, or chaga tea"]},
+            ]},
         },
     },
 }
-GROUP_ORDER = ["1-3", "4-6", "7-8", "9"]
 
 QUOTES = [
     "Artichoke contain phytochemicals that stop the growth of tumors and cysts",
@@ -300,7 +295,6 @@ QUOTES = [
 # -----------------------------
 # Helpers
 # -----------------------------
-
 def to_iso(d: date) -> str:
     return d.isoformat()
 
@@ -314,7 +308,6 @@ def cycle_id(program_key: str, start_iso: str) -> str:
     return f"{program_key}|{start_iso}"
 
 def day_index(active: Dict[str, Any]) -> int:
-    """Return current day number (1-9) based on today's date; clamp to [1, 9]."""
     start = iso_to_date(active["start_iso"]) if isinstance(active["start_iso"], str) else active["start_iso"]
     idx = (date.today() - start).days + 1
     return max(1, min(9, idx))
@@ -327,44 +320,94 @@ def group_for_day(n: int) -> str:
     return "7–9"
 
 def days_for(group_key: str) -> list[int]:
-    """Return the list of day numbers represented by a group key like '1-3' or '9'."""
     if "-" in group_key:
         a, b = group_key.split("-")
         return list(range(int(a), int(b) + 1))
     return [int(group_key)]
 
 def group_keys_for_program(program: Dict[str, Any]) -> list[str]:
-    """Preserve the insertion order as defined in PROGRAMS[...]"""
     return list(program["groups"].keys())
 
 def group_label_for_day(active: Dict[str, Any], day_num: int) -> str:
-    """Return the label of the phase that contains `day_num` in the active program."""
     program = PROGRAMS[active["program_key"]]
     for gkey in group_keys_for_program(program):
         if day_num in days_for(gkey):
-            # pretty label: "1–3" or "9"
             return gkey.replace("-", "–")
-    # Fallback (shouldn't happen): last group label
     keys = group_keys_for_program(program)
     return keys[-1].replace("-", "–")
+
+def required_keys_ok(state: Dict[str, Any]) -> bool:
+    needed = {"program_key", "start_iso", "id", "checks"}
+    return isinstance(state, dict) and needed.issubset(state.keys())
+
+# ---------- URL persistence helpers ----------
+def _get_qp_dict() -> Dict[str, Any]:
+    try:
+        return dict(st.query_params)
+    except Exception:
+        return st.experimental_get_query_params()
+
+def _set_qp_dict(d: Dict[str, Any]):
+    try:
+        st.query_params.clear()
+        for k, v in d.items():
+            st.query_params[k] = v
+    except Exception:
+        st.experimental_set_query_params(**d)
+
+def _clear_qp():
+    _set_qp_dict({})
+
+def _encode_state(state: Dict[str, Any]) -> str:
+    j = json.dumps(state, separators=(",", ":"), ensure_ascii=False)
+    c = zlib.compress(j.encode("utf-8"))
+    return base64.urlsafe_b64encode(c).decode("ascii")
+
+def _decode_state(token: str) -> Dict[str, Any] | None:
+    try:
+        j = zlib.decompress(base64.urlsafe_b64decode(token.encode("ascii"))).decode("utf-8")
+        return json.loads(j)
+    except Exception:
+        return None
+
+def _persist_active_to_url():
+    if st.session_state.active:
+        _set_qp_dict({"s": _encode_state(st.session_state.active)})
+    else:
+        _clear_qp()
+
+def _rehydrate_from_url() -> bool:
+    qp = _get_qp_dict()
+    token = qp.get("s")
+    if token:
+        if isinstance(token, list):
+            token = token[0]
+        state = _decode_state(token)
+        if state and required_keys_ok(state):
+            st.session_state.active = state
+            st.session_state.checks = dict(state.get("checks", {}))
+            _persist_active_to_url()
+            return True
+    return False
 
 # -----------------------------
 # Session state init
 # -----------------------------
 if "page" not in st.session_state:
-    # First-time users land on menu; returning users with active state will be routed to Home below
     st.session_state.page = "home"
 if "active" not in st.session_state:
-    st.session_state.active = None  # dict with program_key, start_iso, id, checks
+    st.session_state.active = None
 if "completed_cycles" not in st.session_state:
     st.session_state.completed_cycles = 0
 if "checks" not in st.session_state:
     st.session_state.checks = {}
 
+# Rehydrate from URL AFTER defaults, BEFORE routing
+_rehydrate_from_url()
+
 # -----------------------------
 # UI Components
 # -----------------------------
-
 def header_bar():
     with st.container():
         cols = st.columns([1, 2, 2])
@@ -384,12 +427,14 @@ def header_bar():
                 st.rerun()
             if c2.button("🔄 Start Over"):
                 st.session_state.active = None
+                _clear_qp()
                 st.session_state.page = "menu"
                 st.rerun()
             if st.session_state.active and is_cycle_complete(st.session_state.active):
                 if c3.button("🥇 Finish this program"):
                     st.session_state.completed_cycles += 1
                     st.session_state.active = None
+                    _clear_qp()
                     st.session_state.page = "history"
                     st.balloons()
                     st.rerun()
@@ -397,7 +442,6 @@ def header_bar():
 # -----------------------------
 # Views
 # -----------------------------
-
 def view_menu():
     header_bar()
     st.write("")
@@ -429,14 +473,11 @@ def view_menu():
 
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-    # ---- Start controls ----
     prog_key = st.session_state.get("_home_selection", "original")
     st.markdown(f"##### Selected: **{PROGRAMS[prog_key]['label']}**")
 
     today = date.today()
-    start_mode = st.radio(
-        "Quick start", ["Yesterday", "Today", "Tomorrow", "Pick a date"], index=1, horizontal=True
-    )
+    start_mode = st.radio("Quick start", ["Yesterday", "Today", "Tomorrow", "Pick a date"], index=1, horizontal=True)
     if start_mode == "Yesterday":
         start_date = today - timedelta(days=1)
     elif start_mode == "Tomorrow":
@@ -471,15 +512,15 @@ def view_menu():
                 state = json.loads(uploaded.read().decode("utf-8"))
                 if required_keys_ok(state):
                     st.session_state.active = state
+                    st.session_state.checks = dict(state.get("checks", {}))
+                    _persist_active_to_url()
                     st.success("Progress restored.")
                 else:
                     st.error("This JSON does not look like a saved MM 369 state.")
             except Exception as e:
                 st.error(f"Could not parse file: {e}")
 
-
 def view_home():
-    # If no active cycle yet, go to menu for first‑time users
     if not st.session_state.active:
         st.session_state.page = "menu"
         st.rerun()
@@ -493,12 +534,10 @@ def view_home():
         st.markdown(f"### {program['label']}")
         st.caption(f"Start: {active['start_iso']}")
 
-        # Overall progress
         total, done = count_tasks(active)
         pct = int(round((done / total) * 100)) if total else 0
         st.progress(pct / 100.0, text=f"Overall progress: {pct}% ({done}/{total})")
 
-        # Current day info
         d_idx = day_index(active)
         group_label = group_label_for_day(active, d_idx)
         today_date = fmt_date(iso_to_date(active["start_iso"]) + timedelta(days=d_idx - 1))
@@ -512,21 +551,19 @@ def view_home():
         st.markdown("**Medals**")
         count = st.session_state.completed_cycles
         if count == 0:
-            st.info("No completed 9‑day cycles yet. You got this!")
+            st.info("No completed 9-day cycles yet. You got this!")
         else:
             st.markdown(f"<div class='medal'>{'🥇' * min(count, 12)} {'+' if count>12 else ''}</div>", unsafe_allow_html=True)
             st.caption(f"Completed cycles: {count}")
 
         st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-        # Motivational quote (deterministic per day)
         seed = int(datetime.now().strftime('%Y%j'))
         random.seed(seed)
         quote = random.choice(QUOTES)
         st.markdown("<div class='kicker'>MM quote</div>", unsafe_allow_html=True)
         st.write(f"“{quote}”")
 
-    # Export / Import (also accessible here)
     with st.expander("Export / Import"):
         if st.session_state.active:
             data = json.dumps(st.session_state.active, indent=2)
@@ -537,12 +574,13 @@ def view_home():
                 state = json.loads(uploaded.read().decode("utf-8"))
                 if required_keys_ok(state):
                     st.session_state.active = state
+                    st.session_state.checks = dict(state.get("checks", {}))
+                    _persist_active_to_url()
                     st.success("Progress restored.")
                 else:
                     st.error("This JSON does not look like a saved MM 369 state.")
             except Exception as e:
                 st.error(f"Could not parse file: {e}")
-
 
 def view_tracker():
     if not st.session_state.active:
@@ -555,19 +593,16 @@ def view_tracker():
     st.subheader(program["label"])
     st.caption(f"Start: {active['start_iso']}")
 
-    # Progress
     total, done = count_tasks(active)
     pct = int(round((done / total) * 100)) if total else 0
     st.progress(pct / 100.0, text=f"Overall progress: {pct}%")
 
-    # Build tabs from the program definition (handles 1-3, 4-6, 7-8, 9)
     group_keys = group_keys_for_program(program)
     tab_labels = [f"Days {g.replace('-', '–')}" if "-" in g else f"Day {g}" for g in group_keys]
     tabs = st.tabs(tab_labels)
     for tab, gkey in zip(tabs, group_keys):
         with tab:
             render_group(active, gkey)
-
 
 def render_group(active: Dict[str, Any], group_key: str):
     program = PROGRAMS[active["program_key"]]
@@ -589,35 +624,30 @@ def render_group(active: Dict[str, Any], group_key: str):
                     new_val = st.checkbox(txt, key=cid, value=active["checks"][cid])
                     if new_val != active["checks"][cid]:
                         active["checks"][cid] = new_val
-    st.session_state.active = active  # persist
+
+    # Persist after rendering/updating
+    st.session_state.active = active
+    _persist_active_to_url()
 
 # -----------------------------
 # History / medals
 # -----------------------------
-
 def view_history():
     header_bar()
     st.subheader("Your medals")
     count = st.session_state.completed_cycles
     if count == 0:
-        st.info("No completed 9‑day cycles yet. You got this!")
+        st.info("No completed 9-day cycles yet. You got this!")
     else:
         st.markdown(f"<div class='medal'>{'🥇' * min(count, 12)} {'+' if count>12 else ''}</div>", unsafe_allow_html=True)
         st.caption(f"Completed cycles: {count}")
 
 # -----------------------------
-# Utilities for validation & counting
+# Utilities for counting
 # -----------------------------
-
-def required_keys_ok(state: Dict[str, Any]) -> bool:
-    needed = {"program_key", "start_iso", "id", "checks"}
-    return isinstance(state, dict) and needed.issubset(state.keys())
-
-
 def count_tasks(state: Dict[str, Any]) -> Tuple[int, int]:
     program = PROGRAMS[state["program_key"]]
-    total = 0
-    done = 0
+    total, done = 0, 0
     for group_key in group_keys_for_program(program):
         group = program["groups"].get(group_key)
         if not group:
@@ -631,7 +661,6 @@ def count_tasks(state: Dict[str, Any]) -> Tuple[int, int]:
                         done += 1
     return total, done
 
-
 def is_cycle_complete(state: Dict[str, Any]) -> bool:
     total, done = count_tasks(state)
     return total > 0 and total == done
@@ -639,7 +668,6 @@ def is_cycle_complete(state: Dict[str, Any]) -> bool:
 # -----------------------------
 # Actions
 # -----------------------------
-
 def begin_cycle(program_key: str, start_dt: date):
     start_iso = to_iso(start_dt)
     st.session_state.active = {
@@ -648,11 +676,11 @@ def begin_cycle(program_key: str, start_dt: date):
         "id": cycle_id(program_key, start_iso),
         "checks": {},
     }
+    _persist_active_to_url()
 
 # -----------------------------
 # Router
 # -----------------------------
-# First-time users go to menu; returning users with an active cycle land on Home automatically
 if st.session_state.page == "home":
     if st.session_state.active is None:
         st.session_state.page = "menu"
