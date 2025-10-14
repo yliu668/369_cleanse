@@ -624,11 +624,11 @@ def header_bar():
         pct = int(round(cf.get("pct", 0.0) * 100))
         st.warning(
             f"You haven't fully finished the program ({pct}% complete). "
-            "Are you sure you want to end it now?"
+            "Are you sure you want to end it now? If you finish it when you're at least 80%, you will earn a medal"
         )
         cc1, cc2 = st.columns([1, 1])
         with cc1:
-            if st.button("Yes – finish now", key="confirm_finish_yes", type="primary"):
+            if st.button("Yes – finish without medal", key="confirm_finish_yes", type="primary"):
                 st.session_state.pop("_confirm_finish", None)
                 if st.session_state.active:
                     if user:
@@ -641,7 +641,7 @@ def header_bar():
                     st.balloons()
                     st.rerun()
         with cc2:
-            if st.button("Go back", key="confirm_finish_no"):
+            if st.button("Go back. I'll keep trying", key="confirm_finish_no"):
                 st.session_state.pop("_confirm_finish", None)
                 st.toast("Continuing current program")
 
