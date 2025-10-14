@@ -327,6 +327,16 @@ def finish_active_cycle():
     st.balloons()
     st.rerun()
 
+def sb_delete_active(user_id: str, cycle_id: str):
+    """Remove the unfinished cycle so it won't restore, and no medal is awarded."""
+    if not sb:
+        return
+    try:
+        sb.table("progress").delete().eq("user_id", user_id).eq("cycle_id", cycle_id).execute()
+    except Exception as e:
+        st.error("Couldn't end the program without awarding a medal.")
+        st.code(repr(e))
+
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
     url = st.secrets.get("SUPABASE_URL"); key = st.secrets.get("SUPABASE_ANON_KEY")
@@ -636,14 +646,14 @@ def header_bar():
                 st.session_state.pop("_confirm_finish", None)
                 if st.session_state.active:
                     if user:
-                        sb_mark_completed(user.id, st.session_state.active["id"])
-                    else:
-                        st.session_state.completed_cycles += 1
-                    st.session_state.active = None
-                    _clear_qp()
-                    st.session_state.page = "history"
-                    st.balloons()
-                    st.rerun()
+                # End the cycle WITHOUT awarding a medal
+                        sb_delete_active(user.id, st.session_state.active["id"])
+            # Anonymous users: do NOT increment medals
+                st.session_state.active = None
+                _clear_qp()
+                st.session_state.page = "history"
+                st.rerun()
+
         with cc2:
             if st.button("Go back. I'll keep trying", key="confirm_finish_no"):
                 st.session_state.pop("_confirm_finish", None)
