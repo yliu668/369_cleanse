@@ -590,11 +590,14 @@ def header_bar():
 
             if c3.button("🔄 Start Over"):
                 if user and st.session_state.active:
-                    pass  # (keep your future logic hook here if needed)
-                st.session_state.active = None
-                _clear_qp()
-                st.session_state.page = "menu"
-                st.rerun()
+                 # Signed-in users: show a gentle nudge instead of nuking state
+                    st.session_state["_show_start_over_hint"] = True
+                    st.rerun()
+                else:
+                    st.session_state.active = None
+                    _clear_qp()
+                    st.session_state.page = "menu"
+                    st.rerun()
 
             # --- Finish button (always shown if a cycle is active) ---
             if st.session_state.active:
@@ -617,7 +620,8 @@ def header_bar():
                         # ask for confirmation if < threshold
                         st.session_state["_confirm_finish"] = {"pct": frac}
                         st.rerun()
-
+        if st.session_state.pop("_show_start_over_hint", False):
+            st.info("Change your mind? Click Finish program button to re-select a new program")
     # --- Confirmation UI for early finish (<80%) ---
     cf = st.session_state.get("_confirm_finish")
     if cf:
