@@ -358,13 +358,21 @@ def sb_sign_in(email: str, password: str) -> bool:
         if not access or not refresh:
             st.error("Sign-in returned no session tokens.")
             return False
+
+        # Store tokens in a single cookie and trigger a UI toast after rerun
         cookies.set("sb-session", json.dumps({"at": access, "rt": refresh}))
+        st.session_state["_auth_toast"] = "Signed in successfully ✅"
+
+        # If a program was already selected/started, go straight to Home
+        if st.session_state.get("active"):
+            st.session_state.page = "home"
+
+        st.rerun()  # hides the auth expander automatically (because user will be truthy)
         return True
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
         return False
-
 
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
@@ -402,7 +410,8 @@ def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 def sb_upsert_active(user_id: str, state: Dict[str, Any]):
-    if not sb or not state: return
+    if not sb or not state:
+        return
     payload = {
         "user_id": user_id,
         "cycle_id": state["id"],
@@ -412,7 +421,12 @@ def sb_upsert_active(user_id: str, state: Dict[str, Any]):
         "is_completed": False,
         "updated_at": datetime.utcnow().isoformat(),
     }
-    sb.table("progress").upsert(payload).execute()
+    try:
+        # Use the unique index (user_id, cycle_id) so this is idempotent
+        sb.table("progress").upsert(payload, on_conflict="user_id,cycle_id").execute()
+    except Exception as e:
+        st.error("Saving progress failed.")
+        st.code(repr(e))
 
 def sb_mark_completed(user_id: str, cycle_id: str):
     if not sb: return
@@ -449,6 +463,13 @@ if user and not st.session_state.active:
         st.session_state.checks = dict(row.get("checks", {}))
 else:
     _rehydrate_from_url()
+# One-time auth toast (shown after a successful rerun from sb_sign_in)
+_msg = st.session_state.pop("_auth_toast", None)
+if _msg:
+    st.toast(_msg)
+# If the user just signed in and already has local progress, ensure it gets saved to DB
+if user and st.session_state.get("active"):
+    sb_upsert_active(user.id, st.session_state.active)
 
 # -----------------------------
 # UI Components
@@ -463,6 +484,14 @@ def header_bar():
             if st.session_state.active:
                 st.markdown(f"<div class='pill'>📆 Start: <b>{st.session_state.active['start_iso']}</b></div>", unsafe_allow_html=True)
         with right:
+            # 🔹 Signed-in indicator — PLACE ABOVE THE BUTTONS
+            if user:
+                usr_email = getattr(user, "email", None) or "account"
+                st.markdown(
+                    f"<div class='pill'>🔐 Signed in as <b>{usr_email}</b></div>",
+                    unsafe_allow_html=True,
+                )
+                st.write("")  # small spacer
             c1, c2, c3, c4 = st.columns(4)
             # Auth buttons
             if user:
@@ -510,6 +539,12 @@ def view_auth_gate():
         sb_sign_up(email, pw)
 
 def view_menu():
+    def view_menu():
+    # If signed in and there is an active cycle, land on Home
+        if user and st.session_state.get("active"):
+            st.session_state.page = "home"
+            st.rerun()
+
     header_bar()
     if not user:
         with st.expander("Sign in (optional) to save progress across multiple devices", expanded=False):
