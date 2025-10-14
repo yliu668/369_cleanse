@@ -343,9 +343,7 @@ def sb_restore_session_from_cookies():
         if at and rt:
             sb.auth.set_session(at, rt)
     except Exception:
-        # tokens may be expired/corrupt—just clear them
         cookies.delete("sb-session")
-
 
 def sb_sign_in(email: str, password: str) -> bool:
     if not sb:
@@ -367,7 +365,7 @@ def sb_sign_in(email: str, password: str) -> bool:
         if st.session_state.get("active"):
             st.session_state.page = "home"
 
-        st.rerun()  # hides the auth expander automatically (because user will be truthy)
+        st.rerun()
         return True
     except Exception as e:
         st.error("Sign-in failed.")
@@ -377,7 +375,7 @@ def sb_sign_in(email: str, password: str) -> bool:
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
     try:
-        session = sb.auth.sign_up({"email": email, "password": password})
+        sb.auth.sign_up({"email": email, "password": password})
         st.success("Check your email to confirm your account, then sign in.")
         return True
     except Exception as e:
@@ -385,7 +383,7 @@ def sb_sign_up(email: str, password: str) -> bool:
         return False
 
 def sb_sign_out():
-    if not sb: 
+    if not sb:
         return
     try:
         sb.auth.sign_out()
@@ -422,7 +420,7 @@ def sb_upsert_active(user_id: str, state: Dict[str, Any]):
         "updated_at": datetime.utcnow().isoformat(),
     }
     try:
-        # Use the unique index (user_id, cycle_id) so this is idempotent
+        # Idempotent upsert based on unique index (user_id, cycle_id)
         sb.table("progress").upsert(payload, on_conflict="user_id,cycle_id").execute()
     except Exception as e:
         st.error("Saving progress failed.")
@@ -436,7 +434,6 @@ def sb_mark_completed(user_id: str, cycle_id: str):
 def sb_completed_count(user_id: str) -> int:
     if not sb: return 0
     res = sb.table("progress").select("id", count="exact").eq("user_id", user_id).eq("is_completed", True).execute()
-    # Supabase python client returns count separately (res.count) or inside data; fallback:
     return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
 
 # -----------------------------
@@ -463,10 +460,12 @@ if user and not st.session_state.active:
         st.session_state.checks = dict(row.get("checks", {}))
 else:
     _rehydrate_from_url()
+
 # One-time auth toast (shown after a successful rerun from sb_sign_in)
 _msg = st.session_state.pop("_auth_toast", None)
 if _msg:
     st.toast(_msg)
+
 # If the user just signed in and already has local progress, ensure it gets saved to DB
 if user and st.session_state.get("active"):
     sb_upsert_active(user.id, st.session_state.active)
@@ -484,14 +483,11 @@ def header_bar():
             if st.session_state.active:
                 st.markdown(f"<div class='pill'>📆 Start: <b>{st.session_state.active['start_iso']}</b></div>", unsafe_allow_html=True)
         with right:
-            # 🔹 Signed-in indicator — PLACE ABOVE THE BUTTONS
+            # Signed-in indicator
             if user:
                 usr_email = getattr(user, "email", None) or "account"
-                st.markdown(
-                    f"<div class='pill'>🔐 Signed in as <b>{usr_email}</b></div>",
-                    unsafe_allow_html=True,
-                )
-                st.write("")  # small spacer
+                st.markdown(f"<div class='pill'>🔐 Signed in as <b>{usr_email}</b></div>", unsafe_allow_html=True)
+                st.write("")  # spacer
             c1, c2, c3, c4 = st.columns(4)
             # Auth buttons
             if user:
@@ -505,7 +501,6 @@ def header_bar():
                 st.session_state.page = "home"; st.rerun()
             if c3.button("🔄 Start Over"):
                 if user and st.session_state.active:
-                    # Do not mark completed; just clear active row by starting a new cycle later
                     pass
                 st.session_state.active = None
                 _clear_qp()
@@ -535,9 +530,7 @@ def view_auth_gate():
 
     if submit_login and email and pw:
         if sb_sign_in(email, pw):
-            # show a one-time success banner after rerun
             st.session_state._auth_msg = f"Signed in as {email}"
-            # go to Home right away
             st.session_state.page = "home"
             st.rerun()
 
@@ -545,14 +538,15 @@ def view_auth_gate():
         sb_sign_up(email, pw)
 
 def view_menu():
+    # one-time banner after sign-in
     msg = st.session_state.pop("_auth_msg", None)
     if msg:
         st.success(msg)
-    def view_menu():
+
     # If signed in and there is an active cycle, land on Home
-        if user and st.session_state.get("active"):
-            st.session_state.page = "home"
-            st.rerun()
+    if user and st.session_state.get("active"):
+        st.session_state.page = "home"
+        st.rerun()
 
     header_bar()
     if not user:
@@ -574,7 +568,9 @@ def view_menu():
                   <div class="option-card-title">{label}</div>
                   <div class="badge">✓</div>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                unsafe_allow_html=True,
+            )
             if st.button("✅ Selected" if is_selected else "Select", key=f"pick_{key}", use_container_width=True, type="primary" if is_selected else "secondary"):
                 st.session_state._home_selection = key
                 st.session_state._home_label = PROGRAMS[key]["label"]
@@ -622,7 +618,7 @@ def view_menu():
 def view_home():
     msg = st.session_state.pop("_auth_msg", None)
     if msg:
-     st.success(msg)
+        st.success(msg)
 
     if not st.session_state.active:
         st.session_state.page = "menu"; st.rerun()
@@ -726,10 +722,9 @@ def render_group(active: Dict[str, Any], group_key: str):
         st.session_state.active = active
         if user:
             sb_upsert_active(user.id, active)
-            st.toast("Saved to cloud ⛅")   # <— visual confirmation
-    else:
-        _persist_active_to_url()
-
+            st.toast("Saved to cloud ⛅")
+        else:
+            _persist_active_to_url()
 
 # -----------------------------
 # History / medals
