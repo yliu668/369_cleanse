@@ -813,9 +813,10 @@ def view_home():
             st.caption(f"Completed cycles: {count}")
 
         st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-        seed = int(datetime.now().strftime('%Y%j')); random.seed(seed)
-        st.markdown("<div class='kicker'>MM quote</div>", unsafe_allow_html=True)
-        st.write(f"“{random.choice(QUOTES)}”")
+        today_ord = datetime.today().date().toordinal()
+        quote = QUOTES[today_ord % len(QUOTES)]
+        st.markdown("<div class='kicker'>Daily MM quote</div>", unsafe_allow_html=True)
+        st.write(f"“{quote}”")
 
     with st.expander("Export / Import"):
         if st.session_state.active:
