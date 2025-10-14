@@ -19,31 +19,6 @@ FINISH_WARN_THRESHOLD = 0.80  # confirm only if progress is below 80%
 st.set_page_config(page_title="MM 369 Cleanse Tracker", page_icon="🥗", layout="wide")
 import streamlit.components.v1 as components
 
-def _capture_hash_tokens():
-    # Moves #access_token=... from URL hash -> query string, then reloads once
-    components.html(
-        """
-        <script>
-        (function(){
-          const h = new URLSearchParams(location.hash.slice(1));
-          if (!h.toString()) return;
-          const q = new URLSearchParams(location.search);
-          if (!q.get("__from_hash")) {
-            for (const [k,v] of h) q.set(k,v);
-            q.set("__from_hash","1");
-            const u = location.pathname + "?" + q.toString();
-            history.replaceState({}, "", u);
-            location.hash = "";
-            location.replace(u);
-          }
-        })();
-        </script>
-        """,
-        height=0,
-    )
-
-# Call once after page_config:
-_capture_hash_tokens()
 
 # -----------------------------
 # Styles
@@ -565,10 +540,6 @@ def sb_completed_count(user_id: str) -> int:
              .execute())
     return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
 
-    if not sb: return 0
-    res = sb.table("progress").select("id", count="exact").eq("user_id", user_id).eq("is_completed", True).execute()
-    return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
-
 # -----------------------------
 # Session state init
 # -----------------------------
@@ -603,20 +574,7 @@ else:
     _rehydrate_from_url()
 # --- Minimal debug, enable with ?debug=1 in the URL ---
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
-# Auto-login via magic-link tokens moved to query by _capture_hash_tokens()
-if sb:
-    at = _qp.get("access_token")
-    rt = _qp.get("refresh_token")
-    if at and rt and not st.session_state.get("_sb_tokens"):
-        try:
-            sb.auth.set_session(access_token=at, refresh_token=rt)
-            st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-            cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
-                        expires_at=datetime.utcnow() + timedelta(days=30))
-            st.session_state["_auth_toast"] = "Signed in via email link ✅"
-            st.rerun()
-        except Exception:
-            pass
+
 
 if _qp.get("debug") == "1":
     st.sidebar.header("Auth Debug")
@@ -774,25 +732,51 @@ def view_auth_gate():
         else:
             sb_sign_up(email, pw)
 
-    # 🔑 Magic Link (no password needed)
-    with st.expander("Forgot password? Use a magic sign-in link"):
-        ml_email = st.text_input("Email for magic link", key="ml_email")
-        if st.button("Send magic link"):
+    # 🔑 Email OTP (no redirects, most reliable)
+    with st.expander("Forgot password? Get a one-time code"):
+        # (Optionally prefill with whatever was typed above)
+        otp_email = st.text_input("Email for sign-in code", key="otp_email", value=email or "")
+        c_send, c_verify = st.columns([1, 1])
+
+        if c_send.button("Send code"):
             if not sb:
                 st.error("Supabase not configured.")
-            elif not ml_email:
+            elif not otp_email:
                 st.warning("Enter your email.")
             else:
                 try:
-                    SITE_URL = st.secrets.get("SITE_URL") or "http://localhost:8501"
-                    sb.auth.sign_in_with_otp({
-                        "email": ml_email,
-                        "options": {"email_redirect_to": SITE_URL}
-                    })
+                    sb.auth.sign_in_with_otp({"email": otp_email})
                 except Exception:
-                    # Don't reveal whether the email exists
-                    pass
-                st.success("If an account exists, a sign-in link was sent.")
+                    pass  # don't leak existence
+                st.success("If an account exists, a 6-digit code was sent.")
+
+        otp_code = st.text_input("Enter 6-digit code", key="otp_code")
+        if c_verify.button("Verify & sign in"):
+            if not otp_email or not otp_code:
+                st.warning("Enter your email and the code.")
+            else:
+                try:
+                    res = sb.auth.verify_otp({
+                        "email": otp_email,
+                        "token": otp_code,
+                        "type": "email",
+                    })
+                    sess = getattr(res, "session", None)
+                    at = getattr(sess, "access_token", None) if sess else None
+                    rt = getattr(sess, "refresh_token", None) if sess else None
+                    if at and rt:
+                        sb.auth.set_session(at, rt)
+                        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+                        cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
+                                    expires_at=datetime.utcnow() + timedelta(days=30))
+                        st.session_state["_auth_toast"] = "Signed in ✅"
+                        st.session_state.page = "home"
+                        st.rerun()
+                    else:
+                        st.error("That code is invalid or expired. Request a new one.")
+                except Exception:
+                    st.error("That code is invalid or expired. Request a new one.")
+
 
 def view_menu():
     # If signed in and there is an active cycle, land on Home
