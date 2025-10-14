@@ -11,6 +11,8 @@ import streamlit as st
 from supabase import create_client, Client
 from extra_streamlit_components import CookieManager
 
+FINISH_WARN_THRESHOLD = 0.80  # confirm only if progress is below 80%
+
 # -----------------------------
 # Page config
 # -----------------------------
@@ -311,6 +313,20 @@ def _rehydrate_from_url() -> bool:
             return True
     return False
 
+def finish_active_cycle():
+    active = st.session_state.get("active")
+    if not active:
+        return
+    if user:
+        sb_mark_completed(user.id, active["id"])
+    else:
+        st.session_state.completed_cycles += 1
+    st.session_state.active = None
+    _clear_qp()
+    st.session_state.page = "history"
+    st.balloons()
+    st.rerun()
+
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
     url = st.secrets.get("SUPABASE_URL"); key = st.secrets.get("SUPABASE_ANON_KEY")
@@ -350,26 +366,37 @@ def sb_sign_in(email: str, password: str) -> bool:
         st.error("Supabase not configured (missing SUPABASE_URL / SUPABASE_ANON_KEY).")
         return False
     try:
-        session = sb.auth.sign_in_with_password({"email": email, "password": password})
-        access = getattr(getattr(session, "session", None), "access_token", None)
-        refresh = getattr(getattr(session, "session", None), "refresh_token", None)
-        if not access or not refresh:
+        res = sb.auth.sign_in_with_password({"email": email, "password": password})
+
+        # Pull tokens (AuthResponse.session is an object in supabase-py v2)
+        sess = getattr(res, "session", None)
+        at = getattr(sess, "access_token", None) if sess else None
+        rt = getattr(sess, "refresh_token", None) if sess else None
+        if not at or not rt:
             st.error("Sign-in returned no session tokens.")
+            # Helpful for debugging what came back:
+            st.code(str(res))
             return False
 
-        # ✅ set the session NOW (works even before the cookie roundtrip)
-        sb.auth.set_session(access, refresh)
+        # Make the session active NOW (for this run)
+        sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # ✅ persist for later reruns
-        cookies.set("sb-session", json.dumps({"at": access, "rt": refresh}))
+        # ✅ Persist for reruns (doesn't depend on the browser cookie)
+        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
 
-        # one-time toast + optional redirect to Home if a program was chosen
+        # ✅ Try to persist to a browser cookie too (useful across tabs/devices)
+        # CookieManager accepts a datetime for expires_at
+        cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
+                    expires_at=datetime.utcnow() + timedelta(days=30))
+
+        # One-time toast + optional redirect
         st.session_state["_auth_toast"] = "Signed in successfully ✅"
         if st.session_state.get("active"):
             st.session_state.page = "home"
 
         st.rerun()
         return True
+
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
@@ -379,19 +406,49 @@ def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
     try:
         sb.auth.sign_up({"email": email, "password": password})
-        st.success("Check your email to confirm your account, then sign in.")
+        st.success("Check your email to confirm your account. You may sign in now.")
         return True
     except Exception as e:
         st.error(f"Sign-up failed: {e}")
         return False
 
 def sb_sign_out():
+    # Try to invalidate the server session, but don't surface errors to the UI
+    if sb:
+        try:
+            sb.auth.sign_out()
+        except Exception:
+            pass  # ignore; we'll still clear local state
+
+    # Clear browser cookie (if set) and in-memory tokens
+    try:
+        cookies.delete("sb-session")
+    except Exception:
+        pass
+    st.session_state.pop("_sb_tokens", None)
+
+    # Clear any active program *and* the URL fallback so anon mode won't restore it
+    st.session_state.active = None
+    try:
+        _clear_qp()  # removes ?s=... so _rehydrate_from_url() can't bring it back
+    except Exception:
+        pass
+
+    # Send the user to Menu and show a toast on the next run
+    st.session_state.page = "menu"
+    st.session_state["_auth_toast"] = "Signed out ✅"
+
+    # Hard rerun now so the router renders Menu immediately
+    st.rerun()
+
     if not sb:
         return
     try:
         sb.auth.sign_out()
     finally:
         cookies.delete("sb-session")
+        st.session_state.pop("_sb_tokens", None)  # NEW: clear in-memory tokens
+
 
 def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
     if not sb: return None
@@ -448,7 +505,15 @@ if "checks" not in st.session_state: st.session_state.checks = {}
 if "completed_cycles" not in st.session_state: st.session_state.completed_cycles = 0  # used only for anon mode
 
 # Try restore (order: Supabase auth → server state → URL fallback)
+# NEW: try restoring a session from st.session_state tokens first (survives reruns)
 if sb:
+    t = st.session_state.get("_sb_tokens")
+    if t and t.get("at") and t.get("rt"):
+        try:
+            sb.auth.set_session(access_token=t["at"], refresh_token=t["rt"])
+        except Exception:
+            # ignore and fall back to cookie
+            pass
     sb_restore_session_from_cookies()
 user = sb_current_user()
 if user and not st.session_state.active:
@@ -467,6 +532,8 @@ else:
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
 if _qp.get("debug") == "1":
     st.sidebar.header("Auth Debug")
+    st.sidebar.write("session_state tokens present:", bool(st.session_state.get("_sb_tokens")))
+
     st.sidebar.write("sb client:", "OK" if sb else "None")
     st.sidebar.write("user present:", bool(user))
     if user:
@@ -487,37 +554,83 @@ if _msg:
 def header_bar():
     with st.container():
         left, mid, right = st.columns([2, 2, 3])
+
+        # --- Left: title/strapline ---
         with left:
             st.markdown("<div class='big-title'>Cleanse to heal 369 tracker</div>", unsafe_allow_html=True)
             st.markdown("<div class='subtle'>YOU CAN HEAL. Keep up the good work</div>", unsafe_allow_html=True)
+
+        # --- Mid: start date pill ---
         with mid:
             if st.session_state.active:
-                st.markdown(f"<div class='pill'>📆 Start: <b>{st.session_state.active['start_iso']}</b></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='pill'>📆 Start: <b>{st.session_state.active['start_iso']}</b></div>",
+                    unsafe_allow_html=True,
+                )
+
+        # --- Right: auth + nav + actions ---
         with right:
             # Signed-in indicator
             if user:
                 usr_email = getattr(user, "email", None) or "account"
                 st.markdown(f"<div class='pill'>🔐 Signed in as <b>{usr_email}</b></div>", unsafe_allow_html=True)
                 st.write("")  # spacer
+
             c1, c2, c3, c4 = st.columns(4)
-            # Auth buttons
+
+            # Auth
             if user:
                 if c1.button("🔒 Sign out"):
                     sb_sign_out()
-                    st.session_state.active = None
-                    st.session_state.page = "menu"
-                    st.rerun()
-            # Nav & actions
+
+            # Nav
             if c2.button("🏠 Home"):
-                st.session_state.page = "home"; st.rerun()
+                st.session_state.page = "home"
+                st.rerun()
+
             if c3.button("🔄 Start Over"):
                 if user and st.session_state.active:
-                    pass
+                    pass  # (keep your future logic hook here if needed)
                 st.session_state.active = None
                 _clear_qp()
-                st.session_state.page = "menu"; st.rerun()
-            if st.session_state.active and is_cycle_complete(st.session_state.active):
-                if c4.button("🥇 Finish this program"):
+                st.session_state.page = "menu"
+                st.rerun()
+
+            # --- Finish button (always shown if a cycle is active) ---
+            if st.session_state.active:
+                total, done = count_tasks(st.session_state.active)
+                frac = (done / total) if total else 0.0
+
+                if c4.button("🥇 Finish program"):
+                    if is_cycle_complete(st.session_state.active) or (frac >= FINISH_WARN_THRESHOLD):
+                        # Finish immediately when complete or ≥ threshold
+                        if user:
+                            sb_mark_completed(user.id, st.session_state.active["id"])
+                        else:
+                            st.session_state.completed_cycles += 1
+                        st.session_state.active = None
+                        _clear_qp()
+                        st.session_state.page = "history"
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        # ask for confirmation if < threshold
+                        st.session_state["_confirm_finish"] = {"pct": frac}
+                        st.rerun()
+
+    # --- Confirmation UI for early finish (<80%) ---
+    cf = st.session_state.get("_confirm_finish")
+    if cf:
+        pct = int(round(cf.get("pct", 0.0) * 100))
+        st.warning(
+            f"You haven't fully finished the program ({pct}% complete). "
+            "Are you sure you want to end it now?"
+        )
+        cc1, cc2 = st.columns([1, 1])
+        with cc1:
+            if st.button("Yes – finish now", key="confirm_finish_yes", type="primary"):
+                st.session_state.pop("_confirm_finish", None)
+                if st.session_state.active:
                     if user:
                         sb_mark_completed(user.id, st.session_state.active["id"])
                     else:
@@ -525,25 +638,38 @@ def header_bar():
                     st.session_state.active = None
                     _clear_qp()
                     st.session_state.page = "history"
-                    st.balloons(); st.rerun()
+                    st.balloons()
+                    st.rerun()
+        with cc2:
+            if st.button("Go back", key="confirm_finish_no"):
+                st.session_state.pop("_confirm_finish", None)
+                st.toast("Continuing current program")
+
 
 # -----------------------------
 # Views
 # -----------------------------
 def view_auth_gate():
-    st.subheader("Sign in to save your progress across devices")
+    st.subheader("Sign up or sign in to save your progress")
     with st.form("auth"):
         email = st.text_input("Email")
         pw = st.text_input("Password", type="password")
-        col = st.columns(2)
-        submit_login = col[0].form_submit_button("Sign in", type="primary")
-        submit_signup = col[1].form_submit_button("Sign up")
+        c1, c2 = st.columns(2)
+        do_login  = c1.form_submit_button("Sign in", type="primary")
+        do_signup = c2.form_submit_button("Sign up")
 
-    if submit_login and email and pw:
-        sb_sign_in(email, pw)
+    if do_login:
+        if not email or not pw:
+            st.warning("Please enter email and password.")
+        elif sb_sign_in(email, pw):      # sets session, cookie, and reruns
+            st.session_state.page = "home"
+            st.rerun()
 
-    if submit_signup and email and pw:
-        sb_sign_up(email, pw)
+    if do_signup:
+        if not email or not pw:
+            st.warning("Please enter email and password.")
+        else:
+            sb_sign_up(email, pw)
 
 def view_menu():
     # If signed in and there is an active cycle, land on Home
@@ -552,7 +678,7 @@ def view_menu():
         st.rerun()
 
     header_bar()
-
+    st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
     # Auth gate (hidden automatically when signed in)
     if not user:
         with st.expander("Sign in (optional) to save progress across multiple devices", expanded=False):
