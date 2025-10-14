@@ -358,6 +358,12 @@ def _set_qp_dict(d: Dict[str, Any]):
 def _clear_qp():
     _set_qp_dict({})
 
+def _slim_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    # Keep only True checkmarks to shorten the URL token
+    slim = dict(state)
+    slim["checks"] = {k: True for k, v in state.get("checks", {}).items() if v}
+    return slim
+
 def _encode_state(state: Dict[str, Any]) -> str:
     j = json.dumps(state, separators=(",", ":"), ensure_ascii=False)
     c = zlib.compress(j.encode("utf-8"))
@@ -372,7 +378,7 @@ def _decode_state(token: str) -> Dict[str, Any] | None:
 
 def _persist_active_to_url():
     if st.session_state.active:
-        _set_qp_dict({"s": _encode_state(st.session_state.active)})
+        _set_qp_dict({"s": _encode_state(_slim_state(st.session_state.active))})
     else:
         _clear_qp()
 
@@ -385,6 +391,7 @@ def _rehydrate_from_url() -> bool:
         state = _decode_state(token)
         if state and required_keys_ok(state):
             st.session_state.active = state
+            # Mirror to a separate key if you like; not required
             st.session_state.checks = dict(state.get("checks", {}))
             _persist_active_to_url()
             return True
@@ -619,11 +626,14 @@ def render_group(active: Dict[str, Any], group_key: str):
                 st.markdown(f"<div class='section-label'>{section['name']}</div>", unsafe_allow_html=True)
                 for i_idx, txt in enumerate(section["items"]):
                     cid = f"{active['id']}|d{day_num}|s{s_idx}|i{i_idx}"
-                    st.session_state.checks.setdefault(cid, False)
-                    active["checks"].setdefault(cid, False)
-                    new_val = st.checkbox(txt, key=cid, value=active["checks"][cid])
-                    if new_val != active["checks"][cid]:
-                        active["checks"][cid] = new_val
+                    val = active["checks"].get(cid, False)
+                    new_val = st.checkbox(txt, key=cid, value=val)
+                    # Store only True, drop False to keep the URL short
+                    if new_val:
+                        active["checks"][cid] = True
+                    else:
+                        if cid in active["checks"]:
+                            del active["checks"][cid]
 
     # Persist after rendering/updating
     st.session_state.active = active
