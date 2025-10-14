@@ -317,7 +317,10 @@ def _sb_client() -> Optional[Client]:
     if not url or not key: return None
     return create_client(url, key)
 
-cookies = CookieManager()
+# Mount once with a stable key; force it to render early
+cookies = CookieManager(key="mm_cookies")
+_ = cookies.get_all()
+
 sb = _sb_client()
 
 def sb_current_user():
@@ -329,24 +332,39 @@ def sb_current_user():
         return None
 
 def sb_restore_session_from_cookies():
-    if not sb: return
-    at = cookies.get("sb-access"); rt = cookies.get("sb-refresh")
-    if not at or not rt: return
+    if not sb:
+        return
+    raw = cookies.get("sb-session")
+    if not raw:
+        return
     try:
-        sb.auth.set_session(at, rt)
+        data = json.loads(raw)
+        at, rt = data.get("at"), data.get("rt")
+        if at and rt:
+            sb.auth.set_session(at, rt)
     except Exception:
-        pass
+        # tokens may be expired/corrupt—just clear them
+        cookies.delete("sb-session")
+
 
 def sb_sign_in(email: str, password: str) -> bool:
-    if not sb: return False
+    if not sb:
+        st.error("Supabase not configured (missing SUPABASE_URL / SUPABASE_ANON_KEY).")
+        return False
     try:
         session = sb.auth.sign_in_with_password({"email": email, "password": password})
-        cookies.set("sb-access", session.session.access_token)
-        cookies.set("sb-refresh", session.session.refresh_token)
+        access = getattr(getattr(session, "session", None), "access_token", None)
+        refresh = getattr(getattr(session, "session", None), "refresh_token", None)
+        if not access or not refresh:
+            st.error("Sign-in returned no session tokens.")
+            return False
+        cookies.set("sb-session", json.dumps({"at": access, "rt": refresh}))
         return True
     except Exception as e:
-        st.error(f"Sign-in failed: {e}")
+        st.error("Sign-in failed.")
+        st.code(repr(e))
         return False
+
 
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
@@ -359,11 +377,12 @@ def sb_sign_up(email: str, password: str) -> bool:
         return False
 
 def sb_sign_out():
-    if not sb: return
+    if not sb: 
+        return
     try:
         sb.auth.sign_out()
     finally:
-        cookies.delete("sb-access"); cookies.delete("sb-refresh")
+        cookies.delete("sb-session")
 
 def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
     if not sb: return None
@@ -493,7 +512,7 @@ def view_auth_gate():
 def view_menu():
     header_bar()
     if not user:
-        with st.expander("Sign in (optional) to keep progress at the base URL", expanded=False):
+        with st.expander("Sign in (optional) to save progress across multiple devices", expanded=False):
             view_auth_gate()
 
     st.write("")
