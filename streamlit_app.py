@@ -71,6 +71,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 {"name": "Mid-Afternoon", "items": ["1–2 apples (or applesauce) with 1–2 dates"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Evening", "items": ["Apple or applesauce (optional)", "16 ounces lemon or lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Reduce consumption of radical fats", "Avoid No foods (eggs, dairy, gluten, salt, pork, corn, oils, soy, lamb, tuna, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "4-6": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
@@ -78,12 +79,13 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                     "Wait 15–30 minutes",
                     "16 ounces celery juice",
                     "Wait another 15–30 minutes",
-                    "Liver Rescue Smoothie",
+                    "Liver Rescue Smoothie (wblueberries + bananas+red pitayas)",
                 ]},
                 {"name": "Lunchtime", "items": ["Steamed asparagus with Liver Rescue Salad"]},
                 {"name": "Mid-Afternoon", "items": ["At least 1–2 apples/applesauce + 1–3 dates + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Steamed asparagus with Liver Rescue Salad. Day 5: brussels sprouts instead of asparagus. Day 6: both + liver rescue salad"]},
                 {"name": "Evening", "items": ["Apple/applesauce (if desired)", "16 ounces lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats entirely. Skip beans too", "Avoid No foods (eggs, dairy, gluten, salt, pork, corn, oils, soy, lamb, tuna, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Bring more fruits and leafy greens everyday", "Avoid baked or roasted foods","Devote yourself to fruits and veggies","1L water during the day"]},
             ]},
             "7-8": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
@@ -91,7 +93,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                     "Wait 15–30 minutes",
                     "16 ounces celery juice",
                     "Wait another 15–30 minutes",
-                    "Liver Rescue Smoothie",
+                    "Liver Rescue Smoothie (wblueberries + bananas+red pitayas)",
                 ]},
                 {"name": "Lunchtime", "items": ["Spinach Soup over cucumber noodles"]},
                 {"name": "Mid-Afternoon", "items": [
@@ -102,6 +104,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 ]},
                 {"name": "Dinnertime", "items": ["Steamed squash, sweet potatoes, yams, or potatoes with steamed asparagus and/or brussels sprouts + optional liver rescue salad"]},
                 {"name": "Evening", "items": ["Optional apple/applesauce", "16 ounces lemon/lime water", "Hibiscus, lemon balm, or chaga tea"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats entirely. Skip beans too", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives", "Avoid baked or roasted foods","Devote yourself to fruits and veggies", "1L water during the day"]},
             ]},
             "9": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
@@ -122,6 +125,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 ]},
                 {"name": "Dinnertime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
                 {"name": "Evening", "items": ["16 ounces lemon or lime water", "Hibiscus, lemon balm, or chaga tea"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats entirely. Skip beans too", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives", "Avoid baked or roasted foods", "1L water during the day", "Stick with liquid and blended", "Give yourself rest", "Give yourself a thumbs up 👍"]},
             ]},
         },
     },
@@ -135,22 +139,25 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Stick to fruits and leafy greens, millet and oats (if desired)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "4-6": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15–30 mins", "24 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "24 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (dried mangoes, figs, dates OK) and apples if desired"]},
                 {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Stick to fruits and leafy greens, millet and oats (if desired)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "7-8": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon/lime water"]},
-                {"name": "Morning", "items": ["Wait 15–30 mins", "32 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (within guidelines) and apples if desired"]},
+                {"name": "Morning", "items": ["Wait 15–30 mins", "32 ounces celery juice", "Wait another 15–30 mins", "Fruit-based breakfast of your choice (fresh only, frozen OK) and apples if desired"]},
                 {"name": "Lunchtime", "items": ["Meal of your choice (within guidelines)"]},
                 {"name": "Mid-Afternoon", "items": ["Optional apple + 1–4 dates + cucumber slices + celery sticks"]},
                 {"name": "Dinnertime", "items": ["Meal of your choice (within guidelines) that incorporates steamed asparagus and/or brussels sprouts"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Stick to fruits and leafy greens, millet and oats (if desired)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "9": {"sections": [
                 {"name": "Upon Waking", "items": ["16 ounces lemon or lime water"]},
@@ -169,6 +176,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 ]},
                 {"name": "Dinnertime", "items": ["Asparagus Soup or Zucchini Basil Soup"]},
                 {"name": "Evening", "items": ["16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Stick to fruits. Avoid millet and oats on Day 9)", "Avoid baked or roasted foods","1L water during the day", "Stick with liquid and blended", "Give yourself rest", "Give yourself a thumbs up 👍"]}
             ]},
         },
     },
@@ -182,6 +190,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 {"name": "Mid-Afternoon", "items": ["Apples"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Devote yourself exclusively to raw fruits, vegetables, and leafy greens)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "4-6": {"sections": [
                 {"name": "Upon Waking", "items": ["32 ounces lemon/lime water"]},
@@ -190,6 +199,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 {"name": "Mid-Afternoon", "items": ["Apples if hungry"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Devote yourself exclusively to raw fruits, vegetables, and leafy greens)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "7-8": {"sections": [
                 {"name": "Upon Waking", "items": ["32 ounces lemon/lime water"]},
@@ -198,6 +208,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 {"name": "Mid-Afternoon", "items": ["Wait at least 60 mins", "32 ounces celery juice", "Wait at least 15–30 minutes then", "Apples if hungry"]},
                 {"name": "Dinnertime", "items": ["Kale Salad/Cauliflower and Greens Bowl/Tomato, Cucumber, and Herb Salad/Leafy Green Nori Rolls/Spinach Soup with optional cucumber noodles"]},
                 {"name": "Evening", "items": ["Apple/applesauce", "16 ounces of lemon/lime water", "Herbal tea: hibiscus, lemon balm, or chaga"]},
+                {"name": "Guidelines", "items": ["Avoid radical fats (nuts, seeds, oils, coconut, avocado...)entirely", "Avoid No foods (eggs, dairy, gluten, salt, corn, oils, meat, soy, seafood...grains, vinegar, natural flavors, fermented foods, nutritional yeast...preservatives)","Devote yourself exclusively to raw fruits, vegetables, and leafy greens)", "Avoid baked or roasted foods","1L water during the day"]}
             ]},
             "9": {"sections": [
                 {"name": "Upon Waking", "items": ["32 ounces lemon or lime water"]},
@@ -217,6 +228,7 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                 ]},
                 {"name": "Dinnertime", "items": ["32 ounces celery juice", "Wait 15–30 mins", "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
                 {"name": "Evening", "items": ["16 ounces lemon or lime water",  "Hibiscus, lemon balm, or chaga tea"]},
+                {"name": "Guidelines", "items": ["Guidelines from previous days", "Stick with liquid and blended", "Give yourself rest", "Give yourself a thumbs up 👍"]}
             ]},
         },
     },
