@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 import json, base64, zlib
-from datetime import date, datetime, timedelta
 from typing import Dict, Any, Tuple, Optional
 import random
 import streamlit as st
+from datetime import date, datetime, timedelta, timezone
 
 # ---------- Third-party auth/db ----------
 from supabase import create_client, Client
@@ -256,7 +256,7 @@ def cycle_id(program_key: str, start_iso: str) -> str: return f"{program_key}|{s
 
 def day_index(active: Dict[str, Any]) -> int:
     start = iso_to_date(active["start_iso"]) if isinstance(active["start_iso"], str) else active["start_iso"]
-    idx = (date.today() - start).days + 1
+    idx = (today_local() - start).days + 1
     return max(1, min(9, idx))
 
 def days_for(group_key: str) -> list[int]:
@@ -361,8 +361,8 @@ def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pc
             "is_completed": True,
             "medal_awarded": medal_awarded,
             "pct_done": pct_done,
-            "completed_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             # persist whatever checks we have at finish time
             "checks": {k: True for k, v in state.get("checks", {}).items() if v},
         }
@@ -387,6 +387,29 @@ def _sb_client() -> Optional[Client]:
 # Mount once with a stable key; force it to render early
 cookies = CookieManager(key="mm_cookies")
 _ = cookies.get_all()
+# --- Capture browser timezone/offset into cookies (first run triggers a quick reload) ---
+components.html("""
+<script>
+(function(){
+  try{
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    const offset = -new Date().getTimezoneOffset(); // minutes east of UTC
+    const get = (n)=> (document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]*)'))||[])[1];
+    const set = (n,v)=> document.cookie = n+'='+encodeURIComponent(v)+'; path=/; max-age=31536000';
+
+    const hadOff = !!get('mm-off');              // was offset already present?
+    const prevOff = get('mm-off');
+    const prevTz  = get('mm-tz');
+
+    if (!prevTz || prevTz !== tz) set('mm-tz', tz);
+    if (!prevOff || prevOff !== String(offset)) set('mm-off', String(offset));
+
+    // On very first visit, reload once so the server sees the cookie immediately
+    if (!hadOff) location.reload();
+  }catch(e){}
+})();
+</script>
+""", height=0)
 
 sb = _sb_client()
 
@@ -438,7 +461,7 @@ def sb_sign_in(email: str, password: str) -> bool:
         # ✅ Try to persist to a browser cookie too (useful across tabs/devices)
         # CookieManager accepts a datetime for expires_at
         cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
-                    expires_at=datetime.utcnow() + timedelta(days=30))
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=30))
 
         # One-time toast + optional redirect
         st.session_state["_auth_toast"] = "Signed in successfully ✅"
@@ -528,7 +551,7 @@ def sb_upsert_active(user_id: str, state: Dict[str, Any]):
         "start_iso": state["start_iso"],
         "checks": {k: True for k, v in state.get("checks", {}).items() if v},
         "is_completed": False,
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
         # Idempotent upsert based on unique index (user_id, cycle_id)
@@ -539,7 +562,7 @@ def sb_upsert_active(user_id: str, state: Dict[str, Any]):
 
 def sb_mark_completed(user_id: str, cycle_id: str):
     if not sb: return
-    sb.table("progress").update({"is_completed": True, "updated_at": datetime.utcnow().isoformat()}) \
+    sb.table("progress").update({"is_completed": True, "updated_at": datetime.now(timezone.utc).isoformat()}) \
       .eq("user_id", user_id).eq("cycle_id", cycle_id).execute()
 
 def sb_completed_count(user_id: str) -> int:
@@ -551,6 +574,21 @@ def sb_completed_count(user_id: str) -> int:
              .eq("medal_awarded", True)
              .execute())
     return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
+
+from datetime import datetime, date, timedelta  # already imported above
+
+def _browser_offset_minutes() -> int:
+    try:
+        return int(cookies.get("mm-off") or "0")  # minutes east of UTC
+    except Exception:
+        return 0
+
+def today_local() -> date:
+    # Take UTC and shift by the browser's offset
+    return (datetime.now(timezone.utc) + timedelta(minutes=_browser_offset_minutes())).date()
+
+def now_local() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(minutes=_browser_offset_minutes())
 
 # -----------------------------
 # Session state init
@@ -780,7 +818,7 @@ def view_auth_gate():
                         sb.auth.set_session(at, rt)
                         st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
                         cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
-                                    expires_at=datetime.utcnow() + timedelta(days=30))
+                                    expires_at=datetime.now(timezone.utc) + timedelta(days=30))
                         st.session_state["_auth_toast"] = "Signed in ✅"
                         st.session_state.page = "home"
                         st.rerun()
@@ -838,7 +876,7 @@ def view_menu():
     prog_key = st.session_state.get("_home_selection", "original")
     st.markdown(f"##### Selected: **{PROGRAMS[prog_key]['label']}**")
 
-    today = date.today()
+    today = today_local()
     start_mode = st.radio(
         "Quick start",
         ["Yesterday", "Today", "Tomorrow", "Pick a date"],
@@ -932,7 +970,7 @@ def view_home():
             st.caption(f"Completed cycles: {count}")
 
         st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-        today_ord = datetime.today().date().toordinal()
+        today_ord = now_local().date().toordinal()
         quote = QUOTES[today_ord % len(QUOTES)]
         st.markdown("<div class='kicker'>Daily MM quote</div>", unsafe_allow_html=True)
         st.write(f"“{quote}”")
