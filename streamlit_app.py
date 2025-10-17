@@ -414,8 +414,9 @@ components.html("""
 sb = _sb_client()
 # ---- Session token helpers & robust restore/refresh ----
 def _put_tokens(at: str, rt: str):
-    """Store tokens in both st.session_state and a browser cookie."""
+    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
     st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+    # Server-side cookie (visible to Streamlit backend on next request)
     try:
         cookies.set(
             "sb-session",
@@ -423,7 +424,27 @@ def _put_tokens(at: str, rt: str):
             expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         )
     except Exception:
-        pass  # cookie may fail in strict environments; session_state still works
+        pass
+
+    # Client-side backup + first-party cookie (for true cold loads)
+    try:
+        payload = json.dumps({"at": at, "rt": rt})
+        components.html(f"""
+        <script>
+        (function(){{
+          try {{
+            // Backup for our restore block
+            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
+            // Ensure a same-origin cookie exists immediately
+            var secure = (location.protocol === 'https:') ? '; Secure' : '';
+            document.cookie = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+          }} catch(e) {{}}
+        }})();
+        </script>
+        """, height=0)
+    except Exception:
+        pass
 
 def _read_tokens_from_cookie() -> Tuple[Optional[str], Optional[str]]:
     raw = cookies.get("sb-session")
@@ -663,6 +684,32 @@ if "page" not in st.session_state: st.session_state.page = "home"
 if "active" not in st.session_state: st.session_state.active = None
 if "checks" not in st.session_state: st.session_state.checks = {}
 if "completed_cycles" not in st.session_state: st.session_state.completed_cycles = 0  # used only for anon mode
+
+# Restore sb-session cookie from localStorage on cold starts (Chrome/Safari)
+components.html("""
+<script>
+(function(){
+  try{
+    var hasCookie = document.cookie.indexOf('sb-session=') !== -1;
+    // prevent loops if we already reloaded for this purpose
+    var didReload = sessionStorage.getItem('sb-restored') === '1';
+
+    if (!hasCookie && !didReload) {
+      var raw = localStorage.getItem('mm_sb_session');  // JSON: {"at":"...","rt":"..."}
+      if (raw) {
+        var secure = (location.protocol === 'https:') ? '; Secure' : '';
+        document.cookie = 'sb-session=' + encodeURIComponent(raw)
+                          + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+        sessionStorage.setItem('sb-restored', '1');
+        // Reload so the backend sees the freshly set cookie on the next run
+        location.reload();
+      }
+    }
+  }catch(e){}
+})();
+</script>
+""", height=0)
+
 
 # Robust restore + auto-refresh; then hydrate active row or URL-state
 user = _ensure_supabase_session()
