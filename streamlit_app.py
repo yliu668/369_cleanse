@@ -385,7 +385,7 @@ def _finalize_auth_and_reload(next_page: str = "home"):
     # give the cookie/localStorage writer a tick, then hard reload
     components.html("""
     <script>
-      setTimeout(function(){ location.reload(); }, 60);
+      setTimeout(function(){ location.reload(); }, 3800);
     </script>
     """, height=0)
     st.stop()
@@ -448,6 +448,82 @@ def _put_tokens(at: str, rt: str):
           try {{
             localStorage.setItem('mm_sb_session', {json.dumps(payload)});
             var secure = (location.protocol === 'https:') ? '; Secure' : '';
+            var cookieStr = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            document.cookie = cookieStr;
+            
+            // Force a small delay to ensure cookie is written before any reload
+            setTimeout(function() {{
+              sessionStorage.setItem('sb-auth-ready', '1');
+            }}, 50);
+          }} catch(e) {{
+            console.error('Token storage failed:', e);
+          }}
+        }})();
+        </script>
+        """, height=0)
+    except Exception:
+        pass
+    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
+    st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+
+    # 1) Server-side cookie that Streamlit backend will see on NEXT request
+    try:
+        cookies.set(
+            "sb-session",
+            json.dumps({"at": at, "rt": rt}),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+    except Exception:
+        pass
+
+    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
+    try:
+        payload = json.dumps({"at": at, "rt": rt})
+        components.html(f"""
+        <script>
+        (function(){{
+          try {{
+            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
+            var secure = (location.protocol === 'https:') ? '; Secure' : '';
+            var cookieStr = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            document.cookie = cookieStr;
+            
+            // Force a small delay to ensure cookie is written before any reload
+            setTimeout(function() {{
+              sessionStorage.setItem('sb-auth-ready', '1');
+            }}, 50);
+          }} catch(e) {{
+            console.error('Token storage failed:', e);
+          }}
+        }})();
+        </script>
+        """, height=0)
+    except Exception:
+        pass
+    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
+    st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+
+    # 1) Server-side cookie that Streamlit backend will see on NEXT request
+    try:
+        cookies.set(
+            "sb-session",
+            json.dumps({"at": at, "rt": rt}),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+    except Exception:
+        pass
+
+    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
+    try:
+        payload = json.dumps({"at": at, "rt": rt})
+        components.html(f"""
+        <script>
+        (function(){{
+          try {{
+            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
+            var secure = (location.protocol === 'https:') ? '; Secure' : '';
             document.cookie = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
                               + '; path=/; max-age=2592000; SameSite=Lax' + secure;
           }} catch(e) {{}}
@@ -456,9 +532,6 @@ def _put_tokens(at: str, rt: str):
         """, height=0)
     except Exception:
         pass
-
-
-
 
 
 def _read_tokens_from_cookie() -> Tuple[Optional[str], Optional[str]]:
@@ -945,7 +1018,7 @@ def view_auth_gate():
 
 
 def view_menu():
-    # If signed in and there is an active cycle, land on Home
+    # If signed in
     if user:
         st.session_state.page = "home"
         st.rerun()
