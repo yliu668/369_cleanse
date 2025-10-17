@@ -426,107 +426,60 @@ components.html("""
 sb = _sb_client()
 # ---- Session token helpers & robust restore/refresh ----
 def _put_tokens(at: str, rt: str):
-    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
+    """
+    Persist Supabase tokens:
+      - in memory (st.session_state)
+      - server cookie "sb-session" (JSON: {"at","rt"}) for convenience
+      - server cookie "sb-rt" (string refresh token) for reliable, small cold-restore
+      - client localStorage "mm_sb_session" (JSON) + first-party cookies (sb-session, sb-rt) immediately via JS
+    """
+    # In-memory (current run)
     st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
 
-    # 1) Server-side cookie that Streamlit backend will see on NEXT request
+    # Server-side cookies (visible to backend on next request)
     try:
+        # Full session (may be large; keep for convenience)
         cookies.set(
             "sb-session",
             json.dumps({"at": at, "rt": rt}),
             expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         )
+        # Small refresh-token-only cookie
+        cookies.set(
+            "sb-rt",
+            rt,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
     except Exception:
         pass
 
-    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
+    # Client-side: write immediately so a hard reload has the cookies/localStorage set
     try:
-        payload = json.dumps({"at": at, "rt": rt})
+        js_payload  = json.dumps({"at": at, "rt": rt})  # JSON string literal
+        js_rt       = json.dumps(rt)                    # JSON string literal for RT
         components.html(f"""
         <script>
         (function(){{
           try {{
-            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
+            // Local backup for cold starts
+            localStorage.setItem('mm_sb_session', {js_payload});
+
+            // First-party cookies (30 days), Secure on HTTPS
             var secure = (location.protocol === 'https:') ? '; Secure' : '';
-            var cookieStr = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
+            document.cookie = 'sb-session=' + encodeURIComponent({js_payload})
                               + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-            document.cookie = cookieStr;
-            
-            // Force a small delay to ensure cookie is written before any reload
-            setTimeout(function() {{
+
+            // NEW: small refresh-token cookie for robust restore flow
+            document.cookie = 'sb-rt=' + encodeURIComponent({js_rt})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+
+            // A tiny tick to signal auth ready if you need it elsewhere
+            setTimeout(function(){{
               sessionStorage.setItem('sb-auth-ready', '1');
             }}, 50);
           }} catch(e) {{
             console.error('Token storage failed:', e);
           }}
-        }})();
-        </script>
-        """, height=0)
-    except Exception:
-        pass
-    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
-    st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-
-    # 1) Server-side cookie that Streamlit backend will see on NEXT request
-    try:
-        cookies.set(
-            "sb-session",
-            json.dumps({"at": at, "rt": rt}),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-        )
-    except Exception:
-        pass
-
-    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
-    try:
-        payload = json.dumps({"at": at, "rt": rt})
-        components.html(f"""
-        <script>
-        (function(){{
-          try {{
-            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
-            var secure = (location.protocol === 'https:') ? '; Secure' : '';
-            var cookieStr = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
-                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-            document.cookie = cookieStr;
-            
-            // Force a small delay to ensure cookie is written before any reload
-            setTimeout(function() {{
-              sessionStorage.setItem('sb-auth-ready', '1');
-            }}, 50);
-          }} catch(e) {{
-            console.error('Token storage failed:', e);
-          }}
-        }})();
-        </script>
-        """, height=0)
-    except Exception:
-        pass
-    """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
-    st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-
-    # 1) Server-side cookie that Streamlit backend will see on NEXT request
-    try:
-        cookies.set(
-            "sb-session",
-            json.dumps({"at": at, "rt": rt}),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-        )
-    except Exception:
-        pass
-
-    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
-    try:
-        payload = json.dumps({"at": at, "rt": rt})
-        components.html(f"""
-        <script>
-        (function(){{
-          try {{
-            localStorage.setItem('mm_sb_session', {json.dumps(payload)});
-            var secure = (location.protocol === 'https:') ? '; Secure' : '';
-            document.cookie = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
-                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-          }} catch(e) {{}}
         }})();
         </script>
         """, height=0)
@@ -547,61 +500,110 @@ def _read_tokens_from_cookie() -> Tuple[Optional[str], Optional[str]]:
         except Exception:
             pass
         return None, None
+    
+def _read_refresh_cookie() -> Optional[str]:
+    """Small cookie that carries ONLY the refresh token (rt)."""
+    try:
+        return cookies.get("sb-rt")
+    except Exception:
+        return None
+
+def _try_refresh_with_rt(rt: str):
+    """
+    Try to mint a fresh session *using only a refresh token*.
+    Handles both newer and older gotrue/supabase-py call signatures.
+    Returns the new session (or None on failure).
+    """
+    if not sb or not rt:
+        return None
+
+    # Path A: newer gotrue-py accepts the token as an argument
+    try:
+        res = sb.auth.refresh_session(rt)  # newer signature
+        return getattr(res, "session", None)
+    except TypeError:
+        # Path B: older signature: set a temp session with the RT, then refresh
+        try:
+            # Set a placeholder session so the client knows the RT to use
+            sb.auth.set_session(access_token="", refresh_token=rt)
+        except Exception:
+            pass
+        try:
+            res = sb.auth.refresh_session()  # older signature: no args
+            return getattr(res, "session", None)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
 
 def _ensure_supabase_session():
     """
-    Restore session from st.session_state or cookie, refresh if near expiry,
-    then return the current user (or None).
+    Restore/refresh Supabase session in this order:
+      1) In-memory tokens (current run)
+      2) Full "sb-session" cookie ({"at","rt"})
+      3) Small "sb-rt" cookie (refresh only) -> mint a fresh session
+    Then apply tokens via set_session() and proactively refresh near expiry.
+    Returns the current user or None.
     """
     if not sb:
         return None
 
-    # 1) Prefer in-memory tokens; fall back to cookie
     at = rt = None
+
+    # 1) In-memory
     t = st.session_state.get("_sb_tokens")
     if t:
         at, rt = t.get("at"), t.get("rt")
+
+    # 2) Full cookie {at, rt}
     if not (at and rt):
         cat, crt = _read_tokens_from_cookie()
         if cat and crt:
             at, rt = cat, crt
 
-    # 2) Apply tokens if we have them
+    # 3) Refresh-token-only cookie -> try minting a fresh session
+    if not (at and rt):
+        c_rt = _read_refresh_cookie()
+        if c_rt:
+            new_sess = _try_refresh_with_rt(c_rt)
+            if new_sess:
+                at = getattr(new_sess, "access_token", None)
+                rt = getattr(new_sess, "refresh_token", None)
+                if at and rt:
+                    # Persist everywhere so the next reload is seamless
+                    _put_tokens(at, rt)
+
+    # Apply tokens if we have them
     if at and rt:
         try:
             sb.auth.set_session(access_token=at, refresh_token=rt)
         except Exception:
             pass
 
-    # 3) If available, refresh when close to expiry (≈5 min)
+    # Proactive refresh if close to expiry (≈5 minutes)
     try:
-        sess = sb.auth.get_session()
-        if not sess and (at and rt):
-            sb.auth.set_session(access_token=at, refresh_token=rt)
-            sess = sb.auth.get_session()
-
-        if sess and getattr(sess, "expires_at", None):
-            exp = datetime.fromtimestamp(sess.expires_at, tz=timezone.utc)
+        sess_obj = sb.auth.get_session()
+        if sess_obj and getattr(sess_obj, "expires_at", None):
+            exp = datetime.fromtimestamp(sess_obj.expires_at, tz=timezone.utc)
             if exp - datetime.now(timezone.utc) < timedelta(minutes=5):
-                refresher = getattr(sb.auth, "refresh_session", None)
-                if callable(refresher):
+                refreshed = _try_refresh_with_rt(rt)
+                if refreshed:
+                    _put_tokens(refreshed.access_token, refreshed.refresh_token)
                     try:
-                        res = refresher()
-                        new_sess = getattr(res, "session", None)
-                        if new_sess:
-                            _put_tokens(new_sess.access_token, new_sess.refresh_token)
-                            sb.auth.set_session(
-                                access_token=new_sess.access_token,
-                                refresh_token=new_sess.refresh_token,
-                            )
+                        sb.auth.set_session(
+                            access_token=refreshed.access_token,
+                            refresh_token=refreshed.refresh_token,
+                        )
                     except Exception:
                         pass
 
-        # 4) Return current user
+        # Return the current user
         res = sb.auth.get_user()
         return getattr(res, "user", None)
     except Exception:
         return None
+
 
 def sb_current_user():
     if not sb: return None
@@ -666,33 +668,53 @@ def sb_sign_up(email: str, password: str) -> bool:
         st.error(f"Sign-up failed: {e}")
         return False
 
+
 def sb_sign_out():
-    # Try to invalidate the server session (ignore errors)
+    # Best-effort invalidate server session
     if sb:
         try:
             sb.auth.sign_out()
         except Exception:
             pass
 
-    # Clear browser cookie and in-memory tokens
+    # Server-side cookies (tell the backend/browser to expire them)
     try:
         cookies.delete("sb-session")
     except Exception:
         pass
-    st.session_state.pop("_sb_tokens", None)
+    try:
+        cookies.delete("sb-rt")
+    except Exception:
+        pass
 
-    # Clear active program and URL fallback
+    # Clear in-memory tokens & app state
+    st.session_state.pop("_sb_tokens", None)
     st.session_state.active = None
     try:
         _clear_qp()
     except Exception:
         pass
 
-    # Send the user to Menu and show a toast on the next run
+    # Send a small client script to wipe browser storage & cookies NOW, then reload
     st.session_state.page = "menu"
     st.session_state["_auth_toast"] = "Signed out ✅"
-    st.rerun()
+    components.html("""
+    <script>
+    try {
+      // Wipe local caches so the cold-restore code won't re-auth
+      localStorage.removeItem('mm_sb_session');
+      sessionStorage.removeItem('sb-restored');
 
+      // Expire first-party cookies set earlier
+      var attrs = '; path=/; max-age=0; SameSite=Lax' + (location.protocol==='https:'?'; Secure':'');
+      document.cookie = 'sb-session=' + '' + attrs;
+      document.cookie = 'sb-rt=' + '' + attrs;
+    } catch(e) {}
+    // Small delay to ensure the clears stick, then hard reload
+    setTimeout(function(){ location.reload(); }, 50);
+    </script>
+    """, height=0)
+    st.stop()
 
 def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
     if not sb: return None
