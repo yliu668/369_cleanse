@@ -412,6 +412,87 @@ components.html("""
 """, height=0)
 
 sb = _sb_client()
+# ---- Session token helpers & robust restore/refresh ----
+def _put_tokens(at: str, rt: str):
+    """Store tokens in both st.session_state and a browser cookie."""
+    st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+    try:
+        cookies.set(
+            "sb-session",
+            json.dumps({"at": at, "rt": rt}),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+    except Exception:
+        pass  # cookie may fail in strict environments; session_state still works
+
+def _read_tokens_from_cookie() -> Tuple[Optional[str], Optional[str]]:
+    raw = cookies.get("sb-session")
+    if not raw:
+        return None, None
+    try:
+        data = json.loads(raw)
+        return data.get("at"), data.get("rt")
+    except Exception:
+        try:
+            cookies.delete("sb-session")
+        except Exception:
+            pass
+        return None, None
+
+def _ensure_supabase_session():
+    """
+    Restore session from st.session_state or cookie, refresh if near expiry,
+    then return the current user (or None).
+    """
+    if not sb:
+        return None
+
+    # 1) Prefer in-memory tokens; fall back to cookie
+    at = rt = None
+    t = st.session_state.get("_sb_tokens")
+    if t:
+        at, rt = t.get("at"), t.get("rt")
+    if not (at and rt):
+        cat, crt = _read_tokens_from_cookie()
+        if cat and crt:
+            at, rt = cat, crt
+
+    # 2) Apply tokens if we have them
+    if at and rt:
+        try:
+            sb.auth.set_session(access_token=at, refresh_token=rt)
+        except Exception:
+            pass
+
+    # 3) If available, refresh when close to expiry (≈5 min)
+    try:
+        sess = sb.auth.get_session()
+        if not sess and (at and rt):
+            sb.auth.set_session(access_token=at, refresh_token=rt)
+            sess = sb.auth.get_session()
+
+        if sess and getattr(sess, "expires_at", None):
+            exp = datetime.fromtimestamp(sess.expires_at, tz=timezone.utc)
+            if exp - datetime.now(timezone.utc) < timedelta(minutes=5):
+                refresher = getattr(sb.auth, "refresh_session", None)
+                if callable(refresher):
+                    try:
+                        res = refresher()
+                        new_sess = getattr(res, "session", None)
+                        if new_sess:
+                            _put_tokens(new_sess.access_token, new_sess.refresh_token)
+                            sb.auth.set_session(
+                                access_token=new_sess.access_token,
+                                refresh_token=new_sess.refresh_token,
+                            )
+                    except Exception:
+                        pass
+
+        # 4) Return current user
+        res = sb.auth.get_user()
+        return getattr(res, "user", None)
+    except Exception:
+        return None
 
 def sb_current_user():
     if not sb: return None
@@ -431,7 +512,7 @@ def sb_restore_session_from_cookies():
         data = json.loads(raw)
         at, rt = data.get("at"), data.get("rt")
         if at and rt:
-            sb.auth.set_session(at, rt)
+            sb.auth.set_session(access_token=at, refresh_token=rt)
     except Exception:
         cookies.delete("sb-session")
 
@@ -448,20 +529,14 @@ def sb_sign_in(email: str, password: str) -> bool:
         rt = getattr(sess, "refresh_token", None) if sess else None
         if not at or not rt:
             st.error("Sign-in returned no session tokens.")
-            # Helpful for debugging what came back:
             st.code(str(res))
             return False
 
         # Make the session active NOW (for this run)
         sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # ✅ Persist for reruns (doesn't depend on the browser cookie)
-        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-
-        # ✅ Try to persist to a browser cookie too (useful across tabs/devices)
-        # CookieManager accepts a datetime for expires_at
-        cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
-                    expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+        # ✅ Store everywhere (memory + cookie) in one call
+        _put_tokens(at, rt)
 
         # One-time toast + optional redirect
         st.session_state["_auth_toast"] = "Signed in successfully ✅"
@@ -469,7 +544,8 @@ def sb_sign_in(email: str, password: str) -> bool:
             st.session_state.page = "home"
 
         st.rerun()
-        return True
+        # st.stop()  # optional clarity
+        return True  # (unreached after rerun, but harmless)
 
     except Exception as e:
         st.error("Sign-in failed.")
@@ -487,41 +563,31 @@ def sb_sign_up(email: str, password: str) -> bool:
         return False
 
 def sb_sign_out():
-    # Try to invalidate the server session, but don't surface errors to the UI
+    # Try to invalidate the server session (ignore errors)
     if sb:
         try:
             sb.auth.sign_out()
         except Exception:
-            pass  # ignore; we'll still clear local state
+            pass
 
-    # Clear browser cookie (if set) and in-memory tokens
+    # Clear browser cookie and in-memory tokens
     try:
         cookies.delete("sb-session")
     except Exception:
         pass
     st.session_state.pop("_sb_tokens", None)
 
-    # Clear any active program *and* the URL fallback so anon mode won't restore it
+    # Clear active program and URL fallback
     st.session_state.active = None
     try:
-        _clear_qp()  # removes ?s=... so _rehydrate_from_url() can't bring it back
+        _clear_qp()
     except Exception:
         pass
 
     # Send the user to Menu and show a toast on the next run
     st.session_state.page = "menu"
     st.session_state["_auth_toast"] = "Signed out ✅"
-
-    # Hard rerun now so the router renders Menu immediately
     st.rerun()
-
-    if not sb:
-        return
-    try:
-        sb.auth.sign_out()
-    finally:
-        cookies.delete("sb-session")
-        st.session_state.pop("_sb_tokens", None)  # NEW: clear in-memory tokens
 
 
 def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
@@ -598,18 +664,8 @@ if "active" not in st.session_state: st.session_state.active = None
 if "checks" not in st.session_state: st.session_state.checks = {}
 if "completed_cycles" not in st.session_state: st.session_state.completed_cycles = 0  # used only for anon mode
 
-# Try restore (order: Supabase auth → server state → URL fallback)
-# NEW: try restoring a session from st.session_state tokens first (survives reruns)
-if sb:
-    t = st.session_state.get("_sb_tokens")
-    if t and t.get("at") and t.get("rt"):
-        try:
-            sb.auth.set_session(access_token=t["at"], refresh_token=t["rt"])
-        except Exception:
-            # ignore and fall back to cookie
-            pass
-    sb_restore_session_from_cookies()
-user = sb_current_user()
+# Robust restore + auto-refresh; then hydrate active row or URL-state
+user = _ensure_supabase_session()
 if user and not st.session_state.active:
     row = sb_load_active_row(user.id)
     if row:
@@ -622,6 +678,7 @@ if user and not st.session_state.active:
         st.session_state.checks = dict(row.get("checks", {}))
 else:
     _rehydrate_from_url()
+
 # --- Minimal debug, enable with ?debug=1 in the URL ---
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
 
@@ -815,10 +872,12 @@ def view_auth_gate():
                     at = getattr(sess, "access_token", None) if sess else None
                     rt = getattr(sess, "refresh_token", None) if sess else None
                     if at and rt:
-                        sb.auth.set_session(at, rt)
-                        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-                        cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
-                                    expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+                        # Make the session active NOW (for this run)
+                        sb.auth.set_session(access_token=at, refresh_token=rt)
+
+                        # ✅ Store in memory + cookie in one go
+                        _put_tokens(at, rt)
+
                         st.session_state["_auth_toast"] = "Signed in ✅"
                         st.session_state.page = "home"
                         st.rerun()
