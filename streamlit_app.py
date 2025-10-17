@@ -377,6 +377,18 @@ def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pc
         st.error("Couldn't finish the program.")
         st.code(repr(e))
 
+def _finalize_auth_and_reload(next_page: str = "home"):
+    # show a quick message so the component gets a chance to render
+    st.session_state.page = next_page
+    st.session_state["_auth_toast"] = "Signed in ✅"
+    st.markdown("Finishing sign-in…")
+    # give the cookie/localStorage writer a tick, then hard reload
+    components.html("""
+    <script>
+      setTimeout(function(){ location.reload(); }, 60);
+    </script>
+    """, height=0)
+    st.stop()
 
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
@@ -547,7 +559,7 @@ def sb_sign_in(email: str, password: str) -> bool:
     try:
         res = sb.auth.sign_in_with_password({"email": email, "password": password})
 
-        # Pull tokens (AuthResponse.session is an object in supabase-py v2)
+        # Pull tokens
         sess = getattr(res, "session", None)
         at = getattr(sess, "access_token", None) if sess else None
         rt = getattr(sess, "refresh_token", None) if sess else None
@@ -556,21 +568,16 @@ def sb_sign_in(email: str, password: str) -> bool:
             st.code(str(res))
             return False
 
-        # Make the session active NOW (for this run)
+        # Make the session active NOW
         sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # ✅ Store everywhere (memory + cookie) in one call
+        # Store everywhere (memory + cookie + localStorage via JS)
         _put_tokens(at, rt)
 
-        # One-time toast + optional redirect
-        st.session_state["_auth_toast"] = "Signed in successfully ✅"
-        if st.session_state.get("active"):
-            st.session_state.page = "home"
+        # Let JS flush cookies/localStorage, then reload once
+        _finalize_auth_and_reload(next_page="home")  # st.stop() inside
 
-        st.rerun()
-        # st.stop()  # optional clarity
-        return True  # (unreached after rerun, but harmless)
-
+        return True  # unreachable, but fine
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
@@ -939,7 +946,7 @@ def view_auth_gate():
 
 def view_menu():
     # If signed in and there is an active cycle, land on Home
-    if user and st.session_state.get("active"):
+    if user:
         st.session_state.page = "home"
         st.rerun()
 
