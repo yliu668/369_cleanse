@@ -416,7 +416,8 @@ sb = _sb_client()
 def _put_tokens(at: str, rt: str):
     """Store tokens in memory, a server cookie, and localStorage (for cold-start restore)."""
     st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
-    # Server-side cookie (visible to Streamlit backend on next request)
+
+    # 1) Server-side cookie that Streamlit backend will see on NEXT request
     try:
         cookies.set(
             "sb-session",
@@ -426,16 +427,14 @@ def _put_tokens(at: str, rt: str):
     except Exception:
         pass
 
-    # Client-side backup + first-party cookie (for true cold loads)
+    # 2) Client-side backup + first-party cookie RIGHT NOW (for immediate & cold restore)
     try:
         payload = json.dumps({"at": at, "rt": rt})
         components.html(f"""
         <script>
         (function(){{
           try {{
-            // Backup for our restore block
             localStorage.setItem('mm_sb_session', {json.dumps(payload)});
-            // Ensure a same-origin cookie exists immediately
             var secure = (location.protocol === 'https:') ? '; Secure' : '';
             document.cookie = 'sb-session=' + encodeURIComponent({json.dumps(payload)})
                               + '; path=/; max-age=2592000; SameSite=Lax' + secure;
@@ -445,6 +444,10 @@ def _put_tokens(at: str, rt: str):
         """, height=0)
     except Exception:
         pass
+
+
+
+
 
 def _read_tokens_from_cookie() -> Tuple[Optional[str], Optional[str]]:
     raw = cookies.get("sb-session")
