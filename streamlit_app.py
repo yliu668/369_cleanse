@@ -122,6 +122,8 @@ PROGRAMS: Dict[str, Dict[str, Any]] = {
                     "Wait at least 15–30 minutes then",
                     "Water",
                     "Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)",
+                    "Wait at least 15–30 minutes then",
+                    "early evening: 16 ounces celery juice",
                 ]},
                 {"name": "Dinnertime", "items": ["Blended melon, fresh watermelon juice, blended papaya, or blended ripe pear, or fresh-squeezed orange juice (as many servings and as often as desired)"]},
                 {"name": "Evening", "items": ["16 ounces lemon or lime water", "Hibiscus, lemon balm, or chaga tea"]},
