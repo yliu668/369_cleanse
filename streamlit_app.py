@@ -401,26 +401,38 @@ def _sb_client() -> Optional[Client]:
 # Mount once with a stable key; force it to render early
 cookies = CookieManager(key="mm_cookies")
 _ = cookies.get_all()
-# --- Capture browser timezone/offset into cookies (first run triggers a quick reload) ---
+# --- Capture browser timezone/offset into cookies (reload at most once) ---
 components.html("""
 <script>
 (function(){
   try{
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     const offset = -new Date().getTimezoneOffset(); // minutes east of UTC
+
     const get = (n)=> (document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]*)'))||[])[1];
     const set = (n,v)=> document.cookie = n+'='+encodeURIComponent(v)+'; path=/; max-age=31536000';
 
-    const hadOff = !!get('mm-off');              // was offset already present?
+    const hadOff = !!get('mm-off');     // was offset already present before this run?
     const prevOff = get('mm-off');
     const prevTz  = get('mm-tz');
 
+    // Attempt to set/refresh cookies (best effort)
     if (!prevTz || prevTz !== tz) set('mm-tz', tz);
     if (!prevOff || prevOff !== String(offset)) set('mm-off', String(offset));
 
-    // On very first visit, reload once so the server sees the cookie immediately
-    if (!hadOff) location.reload();
-  }catch(e){}
+    // Guard so we reload at most once per tab/session
+    const FLAG = 'mm-tz-reload-attempted';
+    const tried = sessionStorage.getItem(FLAG) === '1';
+
+    // If we didn't have mm-off yet AND we haven't tried a reload in this tab, try once.
+    if (!hadOff && !tried) {
+      sessionStorage.setItem(FLAG, '1');
+      location.reload();
+    }
+    // If cookies are blocked, we won't loop: app falls back to UTC on the server.
+  } catch(e) {
+    // swallow errors silently
+  }
 })();
 </script>
 """, height=0)
