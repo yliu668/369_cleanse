@@ -242,7 +242,7 @@ QUOTES = [
     "You deserve to heal. You deserve to be happy. You deserve to feel whole",
     "At times when you doubt yourself and things are difficult, think of nature",
     "Your heart serves as the compass for your actions, guiding you to do the right thing when your soul becomes lost",
-    "Food is meant to be a joyful part of your life. Healthful eating isn’t meant to be an exercise in deprivation.",
+    "Food is meant to be a joyful part of your life. Healthful eating isn't meant to be an exercise in deprivation.",
     "Your body loves you",
     "Your body is fighting for you",
     "Rising out of the ashes",
@@ -352,6 +352,7 @@ def sb_delete_active(user_id: str, cycle_id: str):
     except Exception as e:
         st.error("Couldn't end the program without awarding a medal.")
         st.code(repr(e))
+
 def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pct_done: int):
     """
     Mark the active cycle as finished (persist checks), and record whether a medal was awarded.
@@ -379,19 +380,6 @@ def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pc
         st.error("Couldn't finish the program.")
         st.code(repr(e))
 
-def _finalize_auth_and_reload(next_page: str = "home"):
-    # show a quick message so the component gets a chance to render
-    st.session_state.page = next_page
-    st.session_state["_auth_toast"] = "Signed in ✅"
-    st.markdown("Finishing sign-in…")
-    # give the cookie/localStorage writer a tick, then hard reload
-    components.html("""
-    <script>
-      setTimeout(function(){ location.reload(); }, 3800);
-    </script>
-    """, height=0)
-    st.stop()
-
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
     url = st.secrets.get("SUPABASE_URL"); key = st.secrets.get("SUPABASE_ANON_KEY")
@@ -401,6 +389,7 @@ def _sb_client() -> Optional[Client]:
 # Mount once with a stable key; force it to render early
 cookies = CookieManager(key="mm_cookies")
 _ = cookies.get_all()
+
 # --- Capture browser timezone/offset into cookies (reload at most once) ---
 components.html("""
 <script>
@@ -412,32 +401,27 @@ components.html("""
     const get = (n)=> (document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]*)'))||[])[1];
     const set = (n,v)=> document.cookie = n+'='+encodeURIComponent(v)+'; path=/; max-age=31536000';
 
-    const hadOff = !!get('mm-off');     // was offset already present before this run?
+    const hadOff = !!get('mm-off');
     const prevOff = get('mm-off');
     const prevTz  = get('mm-tz');
 
-    // Attempt to set/refresh cookies (best effort)
     if (!prevTz || prevTz !== tz) set('mm-tz', tz);
     if (!prevOff || prevOff !== String(offset)) set('mm-off', String(offset));
 
-    // Guard so we reload at most once per tab/session
     const FLAG = 'mm-tz-reload-attempted';
     const tried = sessionStorage.getItem(FLAG) === '1';
 
-    // If we didn't have mm-off yet AND we haven't tried a reload in this tab, try once.
     if (!hadOff && !tried) {
       sessionStorage.setItem(FLAG, '1');
       location.reload();
     }
-    // If cookies are blocked, we won't loop: app falls back to UTC on the server.
-  } catch(e) {
-    // swallow errors silently
-  }
+  } catch(e) {}
 })();
 </script>
 """, height=0)
 
 sb = _sb_client()
+
 # ---- Session token helpers & robust restore/refresh ----
 def _put_tokens(at: str, rt: str):
     """
@@ -447,53 +431,33 @@ def _put_tokens(at: str, rt: str):
       - server cookie "sb-rt" (string refresh token) for reliable, small cold-restore
       - client localStorage "mm_sb_session" (JSON) + first-party cookies (sb-session, sb-rt) immediately via JS
     """
-    # In-memory (current run)
     st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
 
-    # Server-side cookies (visible to backend on next request)
     try:
-        # Full session (may be large; keep for convenience)
         cookies.set(
             "sb-session",
             json.dumps({"at": at, "rt": rt}),
             expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         )
-        # Small refresh-token-only cookie
-        cookies.set(
-            "sb-rt",
-            rt,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-        )
+        cookies.set("sb-rt", rt, expires_at=datetime.now(timezone.utc) + timedelta(days=30))
     except Exception:
         pass
 
-    # Client-side: write immediately so a hard reload has the cookies/localStorage set
     try:
-        js_payload  = json.dumps({"at": at, "rt": rt})  # JSON string literal
-        js_rt       = json.dumps(rt)                    # JSON string literal for RT
+        js_payload = json.dumps({"at": at, "rt": rt})
+        js_rt = json.dumps(rt)
         components.html(f"""
         <script>
         (function(){{
           try {{
-            // Local backup for cold starts
             localStorage.setItem('mm_sb_session', {js_payload});
-
-            // First-party cookies (30 days), Secure on HTTPS
             var secure = (location.protocol === 'https:') ? '; Secure' : '';
             document.cookie = 'sb-session=' + encodeURIComponent({js_payload})
                               + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-
-            // NEW: small refresh-token cookie for robust restore flow
             document.cookie = 'sb-rt=' + encodeURIComponent({js_rt})
                               + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-
-            // A tiny tick to signal auth ready if you need it elsewhere
-            setTimeout(function(){{
-              sessionStorage.setItem('sb-auth-ready', '1');
-            }}, 50);
-          }} catch(e) {{
-            console.error('Token storage failed:', e);
-          }}
+            setTimeout(function(){{ sessionStorage.setItem('sb-auth-ready', '1'); }}, 50);
+          }} catch(e) {{ console.error('Token storage failed:', e); }}
         }})();
         </script>
         """, height=0)
@@ -531,19 +495,16 @@ def _try_refresh_with_rt(rt: str):
     if not sb or not rt:
         return None
 
-    # Path A: newer gotrue-py accepts the token as an argument
     try:
-        res = sb.auth.refresh_session(rt)  # newer signature
+        res = sb.auth.refresh_session(rt)
         return getattr(res, "session", None)
     except TypeError:
-        # Path B: older signature: set a temp session with the RT, then refresh
         try:
-            # Set a placeholder session so the client knows the RT to use
             sb.auth.set_session(access_token="", refresh_token=rt)
         except Exception:
             pass
         try:
-            res = sb.auth.refresh_session()  # older signature: no args
+            res = sb.auth.refresh_session()
             return getattr(res, "session", None)
         except Exception:
             return None
@@ -585,7 +546,6 @@ def _ensure_supabase_session():
                 at = getattr(new_sess, "access_token", None)
                 rt = getattr(new_sess, "refresh_token", None)
                 if at and rt:
-                    # Persist everywhere so the next reload is seamless
                     _put_tokens(at, rt)
 
     # Apply tokens if we have them
@@ -612,7 +572,6 @@ def _ensure_supabase_session():
                     except Exception:
                         pass
 
-        # Return the current user
         res = sb.auth.get_user()
         return getattr(res, "user", None)
     except Exception:
@@ -627,19 +586,6 @@ def sb_current_user():
     except Exception:
         return None
 
-def sb_restore_session_from_cookies():
-    if not sb:
-        return
-    raw = cookies.get("sb-session")
-    if not raw:
-        return
-    try:
-        data = json.loads(raw)
-        at, rt = data.get("at"), data.get("rt")
-        if at and rt:
-            sb.auth.set_session(access_token=at, refresh_token=rt)
-    except Exception:
-        cookies.delete("sb-session")
 
 def sb_sign_in(email: str, password: str) -> bool:
     if not sb:
@@ -648,7 +594,6 @@ def sb_sign_in(email: str, password: str) -> bool:
     try:
         res = sb.auth.sign_in_with_password({"email": email, "password": password})
 
-        # Pull tokens
         sess = getattr(res, "session", None)
         at = getattr(sess, "access_token", None) if sess else None
         rt = getattr(sess, "refresh_token", None) if sess else None
@@ -657,23 +602,58 @@ def sb_sign_in(email: str, password: str) -> bool:
             st.code(str(res))
             return False
 
-        # Make the session active NOW (for this run)
+        # Make the session active NOW
         sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # Store tokens everywhere (memory + cookies + localStorage via _put_tokens)
-        _put_tokens(at, rt)
+        # Store in memory
+        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
 
-        # Set success state and navigate
-        st.session_state["_auth_toast"] = "Signed in ✅"
-        st.session_state.page = "home"
+        # Store in server-side cookies
+        try:
+            cookies.set("sb-session", json.dumps({"at": at, "rt": rt}),
+                       expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+            cookies.set("sb-rt", rt,
+                       expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+        except Exception:
+            pass
+
+        # Write to localStorage + client cookies, then reload
+        js_payload = json.dumps({"at": at, "rt": rt})
+        js_rt = json.dumps(rt)
         
-        # Simple rerun - let the cold-start restoration handle the next load
-        st.rerun()
+        st.session_state["_auth_toast"] = "Signed in ✅"
+        st.markdown("Signing you in...")
+        
+        components.html(f"""
+        <script>
+        (function(){{
+          try {{
+            if (sessionStorage.getItem('auth-reloading') === '1') return;
+            sessionStorage.setItem('auth-reloading', '1');
+            
+            localStorage.setItem('mm_sb_session', {js_payload});
+            
+            var secure = (location.protocol === 'https:') ? '; Secure' : '';
+            document.cookie = 'sb-session=' + encodeURIComponent({js_payload})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            document.cookie = 'sb-rt=' + encodeURIComponent({js_rt})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            
+            setTimeout(function(){{ location.reload(); }}, 800);
+          }} catch(e) {{
+            console.error('Auth error:', e);
+            sessionStorage.removeItem('auth-reloading');
+          }}
+        }})();
+        </script>
+        """, height=0)
+        st.stop()
 
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
         return False
+
 
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
@@ -687,14 +667,12 @@ def sb_sign_up(email: str, password: str) -> bool:
 
 
 def sb_sign_out():
-    # Best-effort invalidate server session
     if sb:
         try:
             sb.auth.sign_out()
         except Exception:
             pass
 
-    # Server-side cookies (tell the backend/browser to expire them)
     try:
         cookies.delete("sb-session")
     except Exception:
@@ -704,7 +682,6 @@ def sb_sign_out():
     except Exception:
         pass
 
-    # Clear in-memory tokens & app state
     st.session_state.pop("_sb_tokens", None)
     st.session_state.active = None
     try:
@@ -712,26 +689,21 @@ def sb_sign_out():
     except Exception:
         pass
 
-    # Send a small client script to wipe browser storage & cookies NOW, then reload
     st.session_state.page = "menu"
     st.session_state["_auth_toast"] = "Signed out ✅"
     
-    # THIS IS THE CORRECT SIGN-OUT COMPONENT (wipes storage & reloads)
     components.html("""
     <script>
     try {
-      // Wipe local caches so the cold-restore code won't re-auth
       localStorage.removeItem('mm_sb_session');
       sessionStorage.removeItem('sb-restored');
       sessionStorage.removeItem('auth-reloading');
       sessionStorage.removeItem('sb-restore-attempts');
 
-      // Expire first-party cookies set earlier
       var attrs = '; path=/; max-age=0; SameSite=Lax' + (location.protocol==='https:'?'; Secure':'');
       document.cookie = 'sb-session=' + '' + attrs;
       document.cookie = 'sb-rt=' + '' + attrs;
     } catch(e) {}
-    // Small delay to ensure the clears stick, then hard reload
     setTimeout(function(){ location.reload(); }, 50);
     </script>
     """, height=0)
@@ -755,6 +727,29 @@ def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
+
+def sb_cleanup_duplicate_active(user_id: str):
+    """Clean up duplicate active cycles - keep only the most recent one."""
+    if not sb:
+        return
+    try:
+        q = (
+            sb.table("progress")
+              .select("*")
+              .eq("user_id", user_id)
+              .eq("is_completed", False)
+              .order("updated_at", desc=True)
+              .execute()
+        )
+        rows = q.data or []
+        if len(rows) > 1:
+            # Keep the first (most recent), delete the rest
+            for row in rows[1:]:
+                sb.table("progress").delete().eq("id", row["id"]).execute()
+    except Exception:
+        pass
+
+
 def sb_upsert_active(user_id: str, state: Dict[str, Any]):
     if not sb or not state:
         return
@@ -768,16 +763,17 @@ def sb_upsert_active(user_id: str, state: Dict[str, Any]):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        # Idempotent upsert based on unique index (user_id, cycle_id)
         sb.table("progress").upsert(payload, on_conflict="user_id,cycle_id").execute()
     except Exception as e:
         st.error("Saving progress failed.")
         st.code(repr(e))
 
+
 def sb_mark_completed(user_id: str, cycle_id: str):
     if not sb: return
     sb.table("progress").update({"is_completed": True, "updated_at": datetime.now(timezone.utc).isoformat()}) \
       .eq("user_id", user_id).eq("cycle_id", cycle_id).execute()
+
 
 def sb_completed_count(user_id: str) -> int:
     if not sb: return 0
@@ -789,20 +785,21 @@ def sb_completed_count(user_id: str) -> int:
              .execute())
     return getattr(res, "count", None) or (len(res.data) if isinstance(res.data, list) else 0)
 
-from datetime import datetime, date, timedelta  # already imported above
 
 def _browser_offset_minutes() -> int:
     try:
-        return int(cookies.get("mm-off") or "0")  # minutes east of UTC
+        return int(cookies.get("mm-off") or "0")
     except Exception:
         return 0
 
+
 def today_local() -> date:
-    # Take UTC and shift by the browser's offset
     return (datetime.now(timezone.utc) + timedelta(minutes=_browser_offset_minutes())).date()
+
 
 def now_local() -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=_browser_offset_minutes())
+
 
 # -----------------------------
 # Session state init
@@ -810,25 +807,23 @@ def now_local() -> datetime:
 if "page" not in st.session_state: st.session_state.page = "home"
 if "active" not in st.session_state: st.session_state.active = None
 if "checks" not in st.session_state: st.session_state.checks = {}
-if "completed_cycles" not in st.session_state: st.session_state.completed_cycles = 0  # used only for anon mode
+if "completed_cycles" not in st.session_state: st.session_state.completed_cycles = 0
 
-# Restore sb-session cookie from localStorage on cold starts (Chrome/Safari)
+# Cold-start restoration: restore cookies from localStorage
 components.html("""
 <script>
 (function(){
   try{
     var hasCookie = document.cookie.indexOf('sb-session=') !== -1;
-    // prevent loops if we already reloaded for this purpose
     var didReload = sessionStorage.getItem('sb-restored') === '1';
 
     if (!hasCookie && !didReload) {
-      var raw = localStorage.getItem('mm_sb_session');  // JSON: {"at":"...","rt":"..."}
+      var raw = localStorage.getItem('mm_sb_session');
       if (raw) {
         var secure = (location.protocol === 'https:') ? '; Secure' : '';
         document.cookie = 'sb-session=' + encodeURIComponent(raw)
                           + '; path=/; max-age=2592000; SameSite=Lax' + secure;
         sessionStorage.setItem('sb-restored', '1');
-        // Reload so the backend sees the freshly set cookie on the next run
         location.reload();
       }
     }
@@ -837,18 +832,22 @@ components.html("""
 </script>
 """, height=0)
 
-
-# Robust restore + auto-refresh; then hydrate active row or URL-state
+# Restore session
 user = _ensure_supabase_session()
-# After: user = _ensure_supabase_session()
+
+# Clear auth guards after successful restoration
 if user:
-    # Clear auth reload guards on successful session
     components.html("""
     <script>
     sessionStorage.removeItem('auth-reloading');
     sessionStorage.removeItem('sb-restore-attempts');
     </script>
     """, height=0)
+    
+    # Clean up any duplicate active cycles
+    sb_cleanup_duplicate_active(user.id)
+
+# Load active cycle
 if user and not st.session_state.active:
     row = sb_load_active_row(user.id)
     if row:
@@ -862,27 +861,66 @@ if user and not st.session_state.active:
 else:
     _rehydrate_from_url()
 
-# --- Minimal debug, enable with ?debug=1 in the URL ---
+# Debug panel
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
-
-
 if _qp.get("debug") == "1":
     st.sidebar.header("Auth Debug")
-    st.sidebar.write("session_state tokens present:", bool(st.session_state.get("_sb_tokens")))
-
+    st.sidebar.write("session_state tokens:", bool(st.session_state.get("_sb_tokens")))
     st.sidebar.write("sb client:", "OK" if sb else "None")
     st.sidebar.write("user present:", bool(user))
     if user:
         st.sidebar.write("user id:", getattr(user, "id", None))
         st.sidebar.write("email:", getattr(user, "email", None))
-    st.sidebar.write("cookie sb-session present:", bool(cookies.get("sb-session")))
+    st.sidebar.write("cookie sb-session:", bool(cookies.get("sb-session")))
     st.sidebar.write("page:", st.session_state.page)
-    st.sidebar.write("active set:", bool(st.session_state.get("active")))
+    st.sidebar.write("active:", bool(st.session_state.get("active")))
 
-# One-time auth toast (shown after a successful rerun from sb_sign_in)
+# Show toast if present
 _msg = st.session_state.pop("_auth_toast", None)
 if _msg:
     st.toast(_msg)
+
+
+# -----------------------------
+# Nuclear Reset (if needed)
+# -----------------------------
+if _qp.get("reset") == "nuclear":
+    st.warning("⚠️ NUCLEAR RESET MODE")
+    st.write("This will:")
+    st.write("- Clear all browser storage (localStorage, sessionStorage, cookies)")
+    st.write("- Sign you out completely")
+    st.write("- Reset all app state")
+    
+    if st.button("🔴 EXECUTE NUCLEAR RESET", type="primary"):
+        # Server-side cleanup
+        if user:
+            sb_sign_out()
+        
+        # Client-side nuclear option
+        components.html("""
+        <script>
+        try {
+            // Clear ALL storage
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Clear ALL cookies
+            document.cookie.split(";").forEach(function(c) {
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            });
+            
+            alert('Nuclear reset complete. The page will now reload.');
+            setTimeout(function(){ window.location.href = '/'; }, 500);
+        } catch(e) {
+            alert('Reset failed: ' + e);
+        }
+        </script>
+        """, height=0)
+        st.stop()
+    
+    st.info("👆 Click the button above to reset everything. Or remove ?reset=nuclear from URL to continue normally.")
+    st.stop()
+
 
 # -----------------------------
 # UI Components
@@ -891,12 +929,10 @@ def header_bar():
     with st.container():
         left, mid, right = st.columns([2, 2, 3])
 
-        # --- Left: title/strapline ---
         with left:
             st.markdown("<div class='big-title'>Cleanse to heal 369 tracker</div>", unsafe_allow_html=True)
             st.markdown("<div class='subtle'>YOU CAN HEAL. Keep up the good work</div>", unsafe_allow_html=True)
 
-        # --- Mid: start date pill ---
         with mid:
             if st.session_state.active:
                 st.markdown(
@@ -904,29 +940,24 @@ def header_bar():
                     unsafe_allow_html=True,
                 )
 
-        # --- Right: auth + nav + actions ---
         with right:
-            # Signed-in indicator
             if user:
                 usr_email = getattr(user, "email", None) or "account"
                 st.markdown(f"<div class='pill'>🔐 Signed in as <b>{usr_email}</b></div>", unsafe_allow_html=True)
-                st.write("")  # spacer
+                st.write("")
 
             c1, c2, c3, c4 = st.columns(4)
 
-            # Auth
             if user:
                 if c1.button("🔒 Sign out"):
                     sb_sign_out()
 
-            # Nav
             if c2.button("🏠 Home"):
                 st.session_state.page = "home"
                 st.rerun()
 
             if c3.button("🔄 Start Over"):
                 if user and st.session_state.active:
-                    # Signed-in users: show a gentle nudge instead of nuking state
                     st.session_state["_show_start_over_hint"] = True
                     st.rerun()
                 else:
@@ -935,7 +966,6 @@ def header_bar():
                     st.session_state.page = "menu"
                     st.rerun()
 
-            # --- Finish button (always shown if a cycle is active) ---
             if st.session_state.active:
                 if c4.button("🥇 Finish program"):
                     total, done = count_tasks(st.session_state.active)
@@ -943,11 +973,9 @@ def header_bar():
                     pct = int(round(frac * 100))
 
                     if is_cycle_complete(st.session_state.active) or (frac >= FINISH_WARN_THRESHOLD):
-                        # Finish immediately; award medal
                         if user:
                             sb_finish_cycle(user.id, st.session_state.active, medal_awarded=True, pct_done=pct)
                         else:
-                            # anon mode: medals only count when ≥80%
                             st.session_state.completed_cycles += 1
 
                         st.session_state.active = None
@@ -956,14 +984,12 @@ def header_bar():
                         st.balloons()
                         st.rerun()
                     else:
-                        # ask for confirmation if <80%
                         st.session_state["_confirm_finish"] = {"pct": frac}
                         st.rerun()
 
         if st.session_state.pop("_show_start_over_hint", False):
             st.info("Change your mind? Click Finish program button to re-select a new program")
 
-    # --- Confirmation UI for early finish (<80%) ---
     cf = st.session_state.get("_confirm_finish")
     if cf:
         pct = int(round(cf.get("pct", 0.0) * 100))
@@ -976,15 +1002,12 @@ def header_bar():
             if st.button("Yes – finish without medal", key="confirm_finish_yes", type="primary"):
                 st.session_state.pop("_confirm_finish", None)
                 if st.session_state.active:
-                    # compute pct at finish time
                     total, done = count_tasks(st.session_state.active)
                     frac = (done / total) if total else 0.0
                     pct2 = int(round(frac * 100))
 
                     if user:
-                        # End the cycle WITHOUT awarding a medal (keep data)
                         sb_finish_cycle(user.id, st.session_state.active, medal_awarded=False, pct_done=pct2)
-                    # Anonymous users: no medal increment and no history persisted
 
                 st.session_state.active = None
                 _clear_qp()
@@ -1002,6 +1025,13 @@ def header_bar():
 # -----------------------------
 def view_auth_gate():
     st.subheader("Sign up or sign in to save your progress")
+    
+    # Show nuclear reset option if stuck
+    with st.expander("🆘 Stuck at login? Try nuclear reset"):
+        st.warning("If you're stuck in a login loop, try the nuclear reset:")
+        st.markdown("[🔴 Click here for NUCLEAR RESET](?reset=nuclear)")
+        st.caption("This will clear all your browser data and sign you out. You'll need to sign in again.")
+    
     with st.form("auth"):
         email = st.text_input("Email")
         pw = st.text_input("Password", type="password")
@@ -1012,7 +1042,7 @@ def view_auth_gate():
     if do_login:
         if not email or not pw:
             st.warning("Please enter email and password.")
-        elif sb_sign_in(email, pw):  # sets session, cookie, and reruns
+        elif sb_sign_in(email, pw):
             st.session_state.page = "home"
             st.rerun()
 
@@ -1022,9 +1052,7 @@ def view_auth_gate():
         else:
             sb_sign_up(email, pw)
 
-    # 🔑 Email OTP (no redirects, most reliable)
     with st.expander("Forgot password? Get a one-time code"):
-        # (Optionally prefill with whatever was typed above)
         otp_email = st.text_input("Email for sign-in code", key="otp_email", value=email or "")
         c_send, c_verify = st.columns([1, 1])
 
@@ -1037,7 +1065,7 @@ def view_auth_gate():
                 try:
                     sb.auth.sign_in_with_otp({"email": otp_email})
                 except Exception:
-                    pass  # don't leak existence
+                    pass
                 st.success("If an account exists, a 6-digit code was sent.")
 
         otp_code = st.text_input("Enter 6-digit code", key="otp_code")
@@ -1055,12 +1083,8 @@ def view_auth_gate():
                     at = getattr(sess, "access_token", None) if sess else None
                     rt = getattr(sess, "refresh_token", None) if sess else None
                     if at and rt:
-                        # Make the session active NOW (for this run)
                         sb.auth.set_session(access_token=at, refresh_token=rt)
-
-                        # ✅ Store in memory + cookie in one go
                         _put_tokens(at, rt)
-
                         st.session_state["_auth_toast"] = "Signed in ✅"
                         st.session_state.page = "home"
                         st.rerun()
@@ -1071,14 +1095,13 @@ def view_auth_gate():
 
 
 def view_menu():
-    # If signed in
     if user:
         st.session_state.page = "home"
         st.rerun()
 
     header_bar()
     st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
-    # Auth gate (hidden automatically when signed in)
+    
     if not user:
         with st.expander("Sign in (optional) to save progress across multiple devices", expanded=False):
             view_auth_gate()
@@ -1177,6 +1200,7 @@ def view_menu():
             except Exception as e:
                 st.error(f"Could not parse file: {e}")
 
+
 def view_home():
     if not st.session_state.active:
         st.session_state.page = "menu"; st.rerun()
@@ -1215,7 +1239,7 @@ def view_home():
         today_ord = now_local().date().toordinal()
         quote = QUOTES[today_ord % len(QUOTES)]
         st.markdown("<div class='kicker'>Daily MM quote</div>", unsafe_allow_html=True)
-        st.write(f"“{quote}”")
+        st.write(f""{quote}"")
 
     with st.expander("Export / Import"):
         if st.session_state.active:
@@ -1236,6 +1260,7 @@ def view_home():
             except Exception as e:
                 st.error(f"Could not parse file: {e}")
 
+
 def view_tracker():
     if not st.session_state.active:
         st.session_state.page = "menu"; st.rerun()
@@ -1254,6 +1279,7 @@ def view_tracker():
     tabs = st.tabs(tab_labels)
     for tab, gkey in zip(tabs, group_keys):
         with tab: render_group(active, gkey)
+
 
 def render_group(active: Dict[str, Any], group_key: str):
     program = PROGRAMS[active["program_key"]]
@@ -1285,9 +1311,7 @@ def render_group(active: Dict[str, Any], group_key: str):
         else:
             _persist_active_to_url()
 
-# -----------------------------
-# History / medals
-# -----------------------------
+
 def view_history():
     header_bar()
     st.subheader("Your medals")
@@ -1297,6 +1321,7 @@ def view_history():
     else:
         st.markdown(f"<div class='medal'>{'🥇' * min(count, 12)} {'+' if count>12 else ''}</div>", unsafe_allow_html=True)
         st.caption(f"Completed cycles: {count}")
+
 
 # -----------------------------
 # Counting & completion
@@ -1315,9 +1340,11 @@ def count_tasks(state: Dict[str, Any]) -> Tuple[int, int]:
                     if state["checks"].get(cid): done += 1
     return total, done
 
+
 def is_cycle_complete(state: Dict[str, Any]) -> bool:
     total, done = count_tasks(state)
     return total > 0 and total == done
+
 
 # -----------------------------
 # Actions
@@ -1335,6 +1362,7 @@ def begin_cycle(program_key: str, start_dt: date):
         st.toast("Started + saved to cloud ⛅")
     else:
         _persist_active_to_url()
+
 
 # -----------------------------
 # Router
