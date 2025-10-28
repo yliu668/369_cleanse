@@ -8,8 +8,19 @@ import streamlit as st
 from datetime import date, datetime, timedelta, timezone
 
 # ---------- Third-party auth/db ----------
-from supabase import create_client, Client
-from extra_streamlit_components import CookieManager
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    Client = None
+
+try:
+    from extra_streamlit_components import CookieManager
+    COOKIES_AVAILABLE = True
+except ImportError:
+    COOKIES_AVAILABLE = False
+    CookieManager = None
 
 FINISH_WARN_THRESHOLD = 0.80  # confirm only if progress is below 80%
 
@@ -382,13 +393,39 @@ def sb_finish_cycle(user_id: str, state: Dict[str, Any], medal_awarded: bool, pc
 
 # ---------- Supabase: client, auth, persistence ----------
 def _sb_client() -> Optional[Client]:
+    """Create Supabase client. Returns None if connection fails or Supabase not available."""
+    if not SUPABASE_AVAILABLE:
+        return None
     url = st.secrets.get("SUPABASE_URL"); key = st.secrets.get("SUPABASE_ANON_KEY")
-    if not url or not key: return None
-    return create_client(url, key)
+    if not url or not key: 
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        # SSL certificate errors or other connection issues - fall back to anonymous mode
+        return None
 
 # Mount once with a stable key; force it to render early
-cookies = CookieManager(key="mm_cookies")
-_ = cookies.get_all()
+if COOKIES_AVAILABLE:
+    cookies = CookieManager(key="mm_cookies")
+    try:
+        _ = cookies.get_all()
+    except Exception:
+        # Cookie manager failed, create a mock
+        class MockCookies:
+            def get(self, key): return None
+            def get_all(self): return {}
+            def set(self, *args, **kwargs): pass
+            def delete(self, key): pass
+        cookies = MockCookies()
+else:
+    # Create a mock cookie manager
+    class MockCookies:
+        def get(self, key): return None
+        def get_all(self): return {}
+        def set(self, *args, **kwargs): pass
+        def delete(self, key): pass
+    cookies = MockCookies()
 
 # --- Capture browser timezone/offset into cookies (reload at most once) ---
 components.html("""
@@ -833,7 +870,11 @@ components.html("""
 """, height=0)
 
 # Restore session
-user = _ensure_supabase_session()
+try:
+    user = _ensure_supabase_session()
+except Exception as e:
+    user = None
+    # Silently fail - app will work in anonymous mode
 
 # Clear auth guards after successful restoration
 if user:
@@ -864,6 +905,10 @@ else:
 # Debug panel
 _qp = {k: (v[0] if isinstance(v, list) else v) for k, v in _get_qp_dict().items()}
 if _qp.get("debug") == "1":
+    st.sidebar.header("System Status")
+    st.sidebar.write("Supabase available:", SUPABASE_AVAILABLE)
+    st.sidebar.write("Cookies available:", COOKIES_AVAILABLE)
+    st.sidebar.write("---")
     st.sidebar.header("Auth Debug")
     st.sidebar.write("session_state tokens:", bool(st.session_state.get("_sb_tokens")))
     st.sidebar.write("sb client:", "OK" if sb else "None")
@@ -926,6 +971,10 @@ if _qp.get("reset") == "nuclear":
 # UI Components
 # -----------------------------
 def header_bar():
+    # Show anonymous mode warning if Supabase failed to connect
+    if not sb and not user:
+        st.info("ℹ️ Running in **anonymous mode** - Your progress is saved in the URL. Make sure to bookmark the page or export your progress regularly!")
+    
     with st.container():
         left, mid, right = st.columns([2, 2, 3])
 
