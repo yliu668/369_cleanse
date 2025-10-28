@@ -660,17 +660,71 @@ def sb_sign_in(email: str, password: str) -> bool:
         # Make the session active NOW
         sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # Store everywhere (memory + cookie + localStorage via JS)
-        _put_tokens(at, rt)
+        # Store in memory immediately
+        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
 
-        # Let JS flush cookies/localStorage, then reload once
-        _finalize_auth_and_reload(next_page="home")  # st.stop() inside
+        # Store in server-side cookies (synchronously)
+        try:
+            cookies.set(
+                "sb-session",
+                json.dumps({"at": at, "rt": rt}),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+            cookies.set(
+                "sb-rt",
+                rt,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+        except Exception:
+            pass
 
-        return True  # unreachable, but fine
+        # COMBINED: Set tokens AND reload in one atomic JS operation
+        js_payload = json.dumps({"at": at, "rt": rt})
+        js_rt = json.dumps(rt)
+        
+        st.session_state.page = "home"
+        st.session_state["_auth_toast"] = "Signed in ✅"
+        st.markdown("Finishing sign-in…")
+        
+        components.html(f"""
+        <script>
+        (function(){{
+          try {{
+            // Prevent multiple reloads
+            if (sessionStorage.getItem('auth-reloading') === '1') {{
+              return;
+            }}
+            sessionStorage.setItem('auth-reloading', '1');
+            
+            // Store tokens FIRST
+            localStorage.setItem('mm_sb_session', {js_payload});
+            
+            var secure = (location.protocol === 'https:') ? '; Secure' : '';
+            document.cookie = 'sb-session=' + encodeURIComponent({js_payload})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            document.cookie = 'sb-rt=' + encodeURIComponent({js_rt})
+                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
+            
+            // Wait a bit longer to ensure cookies are set, then reload
+            setTimeout(function(){{
+              sessionStorage.removeItem('auth-reloading');
+              location.reload();
+            }}, 500);  // Reduced from 3800ms - still safe but faster
+          }} catch(e) {{
+            console.error('Auth error:', e);
+            sessionStorage.removeItem('auth-reloading');
+          }}
+        }})();
+        </script>
+        """, height=0)
+        st.stop()
+
+        return True
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
         return False
+
 
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
@@ -712,12 +766,16 @@ def sb_sign_out():
     # Send a small client script to wipe browser storage & cookies NOW, then reload
     st.session_state.page = "menu"
     st.session_state["_auth_toast"] = "Signed out ✅"
+    
+    # THIS IS THE CORRECT SIGN-OUT COMPONENT (wipes storage & reloads)
     components.html("""
     <script>
     try {
       // Wipe local caches so the cold-restore code won't re-auth
       localStorage.removeItem('mm_sb_session');
       sessionStorage.removeItem('sb-restored');
+      sessionStorage.removeItem('auth-reloading');
+      sessionStorage.removeItem('sb-restore-attempts');
 
       // Expire first-party cookies set earlier
       var attrs = '; path=/; max-age=0; SameSite=Lax' + (location.protocol==='https:'?'; Secure':'');
@@ -729,6 +787,7 @@ def sb_sign_out():
     </script>
     """, height=0)
     st.stop()
+
 
 def sb_load_active_row(user_id: str) -> Optional[Dict[str, Any]]:
     if not sb: return None
@@ -832,6 +891,15 @@ components.html("""
 
 # Robust restore + auto-refresh; then hydrate active row or URL-state
 user = _ensure_supabase_session()
+# After: user = _ensure_supabase_session()
+if user:
+    # Clear auth reload guards on successful session
+    components.html("""
+    <script>
+    sessionStorage.removeItem('auth-reloading');
+    sessionStorage.removeItem('sb-restore-attempts');
+    </script>
+    """, height=0)
 if user and not st.session_state.active:
     row = sb_load_active_row(user.id)
     if row:
