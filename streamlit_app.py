@@ -657,74 +657,23 @@ def sb_sign_in(email: str, password: str) -> bool:
             st.code(str(res))
             return False
 
-        # Make the session active NOW
+        # Make the session active NOW (for this run)
         sb.auth.set_session(access_token=at, refresh_token=rt)
 
-        # Store in memory immediately
-        st.session_state["_sb_tokens"] = {"at": at, "rt": rt}
+        # Store tokens everywhere (memory + cookies + localStorage via _put_tokens)
+        _put_tokens(at, rt)
 
-        # Store in server-side cookies (synchronously)
-        try:
-            cookies.set(
-                "sb-session",
-                json.dumps({"at": at, "rt": rt}),
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-            )
-            cookies.set(
-                "sb-rt",
-                rt,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-            )
-        except Exception:
-            pass
-
-        # COMBINED: Set tokens AND reload in one atomic JS operation
-        js_payload = json.dumps({"at": at, "rt": rt})
-        js_rt = json.dumps(rt)
-        
-        st.session_state.page = "home"
+        # Set success state and navigate
         st.session_state["_auth_toast"] = "Signed in ✅"
-        st.markdown("Finishing sign-in…")
+        st.session_state.page = "home"
         
-        components.html(f"""
-        <script>
-        (function(){{
-          try {{
-            // Prevent multiple reloads
-            if (sessionStorage.getItem('auth-reloading') === '1') {{
-              return;
-            }}
-            sessionStorage.setItem('auth-reloading', '1');
-            
-            // Store tokens FIRST
-            localStorage.setItem('mm_sb_session', {js_payload});
-            
-            var secure = (location.protocol === 'https:') ? '; Secure' : '';
-            document.cookie = 'sb-session=' + encodeURIComponent({js_payload})
-                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-            document.cookie = 'sb-rt=' + encodeURIComponent({js_rt})
-                              + '; path=/; max-age=2592000; SameSite=Lax' + secure;
-            
-            // Wait a bit longer to ensure cookies are set, then reload
-            setTimeout(function(){{
-              sessionStorage.removeItem('auth-reloading');
-              location.reload();
-            }}, 500);  // Reduced from 3800ms - still safe but faster
-          }} catch(e) {{
-            console.error('Auth error:', e);
-            sessionStorage.removeItem('auth-reloading');
-          }}
-        }})();
-        </script>
-        """, height=0)
-        st.stop()
+        # Simple rerun - let the cold-start restoration handle the next load
+        st.rerun()
 
-        return True
     except Exception as e:
         st.error("Sign-in failed.")
         st.code(repr(e))
         return False
-
 
 def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
