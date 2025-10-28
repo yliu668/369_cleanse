@@ -396,9 +396,45 @@ def _sb_client() -> Optional[Client]:
     """Create Supabase client. Returns None if connection fails or Supabase not available."""
     if not SUPABASE_AVAILABLE:
         return None
-    url = st.secrets.get("SUPABASE_URL"); key = st.secrets.get("SUPABASE_ANON_KEY")
+    
+    # Try multiple ways to access secrets
+    url = None
+    key = None
+    
+    try:
+        # Method 1: Direct access
+        url = st.secrets.get("SUPABASE_URL")
+        key = st.secrets.get("SUPABASE_ANON_KEY")
+    except Exception:
+        pass
+    
+    if not url or not key:
+        try:
+            # Method 2: Dictionary access
+            url = st.secrets["SUPABASE_URL"]
+            key = st.secrets["SUPABASE_ANON_KEY"]
+        except Exception:
+            pass
+    
+    if not url or not key:
+        try:
+            # Method 3: Nested in supabase section
+            url = st.secrets["supabase"]["url"]
+            key = st.secrets["supabase"]["anon_key"]
+        except Exception:
+            pass
+    
+    if not url or not key:
+        try:
+            # Method 4: Alternate names
+            url = st.secrets.get("supabase_url") or st.secrets.get("url")
+            key = st.secrets.get("supabase_anon_key") or st.secrets.get("anon_key")
+        except Exception:
+            pass
+    
     if not url or not key: 
         return None
+        
     try:
         return create_client(url, key)
     except Exception:
@@ -626,7 +662,26 @@ def sb_current_user():
 
 def sb_sign_in(email: str, password: str) -> bool:
     if not sb:
-        st.error("Supabase not configured (missing SUPABASE_URL / SUPABASE_ANON_KEY).")
+        st.error("⚠️ **Supabase not configured**")
+        st.write("**Please check your Streamlit secrets configuration:**")
+        st.write("1. Go to your app settings in Streamlit Cloud")
+        st.write("2. Click on 'Secrets' in the left sidebar")
+        st.write("3. Make sure you have these exact keys:")
+        st.code("""SUPABASE_URL = "your-project-url"
+SUPABASE_ANON_KEY = "your-anon-key" """)
+        st.write("**OR** if using nested format:")
+        st.code("""[supabase]
+url = "your-project-url"
+anon_key = "your-anon-key" """)
+        
+        with st.expander("🔍 Debug: Show what secrets are available"):
+            try:
+                available_keys = list(st.secrets.keys())
+                st.write("Available secret keys:", available_keys)
+                if "supabase" in available_keys:
+                    st.write("Nested supabase keys:", list(st.secrets["supabase"].keys()))
+            except Exception as e:
+                st.write("Could not read secrets:", e)
         return False
     try:
         res = sb.auth.sign_in_with_password({"email": email, "password": password})
@@ -908,6 +963,22 @@ if _qp.get("debug") == "1":
     st.sidebar.header("System Status")
     st.sidebar.write("Supabase available:", SUPABASE_AVAILABLE)
     st.sidebar.write("Cookies available:", COOKIES_AVAILABLE)
+    
+    # Check secrets
+    st.sidebar.write("---")
+    st.sidebar.header("Secrets Status")
+    try:
+        available_keys = list(st.secrets.keys())
+        st.sidebar.write("Secret keys found:", len(available_keys))
+        st.sidebar.write("Keys:", available_keys)
+        
+        has_url = any(k in available_keys for k in ["SUPABASE_URL", "supabase_url", "url", "supabase"])
+        has_key = any(k in available_keys for k in ["SUPABASE_ANON_KEY", "supabase_anon_key", "anon_key"])
+        st.sidebar.write("URL found:", has_url)
+        st.sidebar.write("Key found:", has_key)
+    except Exception as e:
+        st.sidebar.write("Cannot read secrets:", str(e))
+    
     st.sidebar.write("---")
     st.sidebar.header("Auth Debug")
     st.sidebar.write("session_state tokens:", bool(st.session_state.get("_sb_tokens")))
