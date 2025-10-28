@@ -1239,7 +1239,7 @@ def view_home():
         today_ord = now_local().date().toordinal()
         quote = QUOTES[today_ord % len(QUOTES)]
         st.markdown("<div class='kicker'>Daily MM quote</div>", unsafe_allow_html=True)
-        st.write(f""{quote}"")
+        st.write(f'"{quote}"')
 
     with st.expander("Export / Import"):
         if st.session_state.active:
