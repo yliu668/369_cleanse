@@ -752,7 +752,7 @@ def sb_sign_up(email: str, password: str) -> bool:
     if not sb: return False
     try:
         sb.auth.sign_up({"email": email, "password": password})
-        st.success("Check your email to confirm your account. You may sign in now.")
+        st.success("Account created! You may sign in now.")
         return True
     except Exception as e:
         st.error(f"Sign-up failed: {e}")
