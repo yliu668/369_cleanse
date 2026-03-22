@@ -714,6 +714,7 @@ anon_key = "your-anon-key" """)
         js_rt = json.dumps(rt)
         
         st.session_state["_auth_toast"] = "Signed in ✅"
+        st.session_state.page = "home"
         st.markdown("Signing you in...")
         
         components.html(f"""
@@ -1215,9 +1216,9 @@ def view_auth_gate():
 
 
 def view_menu():
-    if user:
-        st.session_state.page = "home"
-        st.rerun()
+    # Allow authenticated users to access menu to start new cycles
+    # (previously this redirected to "home", causing an infinite loop
+    #  when no active cycle existed)
 
     header_bar()
     st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
