@@ -58,6 +58,11 @@ html, body { color: var(--st-text); }
 .option-card-title{ font-weight:700 }
 .option-card .badge{ position:absolute; top:10px; right:12px; font-size:1rem; opacity:0; transition:opacity .2s ease }
 .option-card.selected .badge{ opacity:1 }
+.quick-start-card{ border:2px solid var(--st-primary); border-radius:18px; padding:1.4rem 1.6rem; background:var(--st-bg2); box-shadow:0 4px 20px rgba(50,205,50,.12); margin:1rem 0 }
+.quick-start-card .qs-title{ font-size:1.15rem; font-weight:700; margin-bottom:.3rem }
+.quick-start-card .qs-sub{ font-size:.88rem; opacity:.7; margin-bottom:.6rem }
+.start-btn-wrap .stButton>button{ font-size:1.15rem!important; font-weight:700!important; padding:.75rem 2.4rem!important; background:var(--st-primary)!important; color:#fff!important; border:none!important; border-radius:12px!important; box-shadow:0 4px 14px rgba(50,205,50,.30)!important; transition:transform .12s ease, box-shadow .15s ease!important }
+.start-btn-wrap .stButton>button:hover{ transform:translateY(-2px)!important; box-shadow:0 6px 22px rgba(50,205,50,.40)!important }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1260,11 +1265,18 @@ def view_menu():
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
     prog_key = st.session_state.get("_home_selection", "original")
-    st.markdown(f"##### Selected: **{PROGRAMS[prog_key]['label']}**")
+
+    st.markdown(
+        f"""<div class="quick-start-card">
+            <div class="qs-title">Ready to begin {PROGRAMS[prog_key]['label']}?</div>
+            <div class="qs-sub">Pick your start date and let's go</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     today = today_local()
     start_mode = st.radio(
-        "Quick start",
+        "When do you want to start?",
         ["Yesterday", "Today", "Tomorrow", "Pick a date"],
         index=1,
         horizontal=True,
@@ -1283,10 +1295,12 @@ def view_menu():
         )
     )
 
-    if st.button("Start", type="primary"):
+    st.markdown("<div class='start-btn-wrap'>", unsafe_allow_html=True)
+    if st.button("Start my 9-day cleanse", type="primary", use_container_width=True):
         begin_cycle(prog_key, start_date)
         st.session_state.page = "home"
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state.active:
         st.info("You have an in-progress cycle. Go to Home or click Log now to resume.")
